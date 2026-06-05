@@ -7,12 +7,13 @@ export default async function infoRoutes(fastify: FastifyInstance) {
     const { imdbId } = request.params;
     
     const meta = await fetchImdbMetadata(imdbId);
-    const type = isShowType(meta.type) ? 'tv' : 'movie';
+    const isShow = isShowType(meta.type);
+    const mediaType = isShow ? 'show' : 'movie';
     
     let episodes: any = null;
     let stream_urls: string[] = [];
 
-    if (type === 'movie') {
+    if (!isShow) {
       const vapData = await getVaplayerData(imdbId, 'movie');
       stream_urls = vapData?.data?.stream_urls || [];
     } else {
@@ -24,12 +25,12 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       imdbId,
       title: meta.title,
       originalTitle: meta.originalTitle,
-      type: meta.type,
-      mediaType: type,
+      type: mediaType,
+      mediaType: mediaType,
       genres: meta.genres,
       year: meta.startYear,
       episodes: episodes,
-      hasPrimaryStream: type === 'movie' ? stream_urls.length > 0 : episodes !== null
+      hasPrimaryStream: !isShow ? stream_urls.length > 0 : episodes !== null
     };
   });
 }

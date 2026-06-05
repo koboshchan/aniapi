@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.ts';
 import { fetchImdbMetadata } from '../services/metadata.ts';
-import { paheSearch, paheGetAllEpisodes, paheExtractLinks, paheExtractM3U8 } from '../services/animepahe.ts';
+import { animetsuSearch, animetsuGetStream } from '../services/animetsu.ts';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
   
@@ -51,8 +51,8 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       };
     }
 
-    // 2. Fallback to AnimePahe
-    console.log(`[Fallback] Vaplayer failed for ${imdbId} S${s}E${e}, trying AnimePahe...`);
+    // 2. Fallback to Animetsu
+    console.log(`[Fallback] Vaplayer failed for ${imdbId} S${s}E${e}, trying Animetsu...`);
     const meta = await fetchImdbMetadata(imdbId);
     
     // Simple search queries based on title
@@ -60,36 +60,25 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       ? [`${meta.title} Season ${s}`, `${meta.title} ${s}nd Season`, meta.title]
       : [meta.title];
     
-    let paheAnime = null;
+    let animetsuId = null;
     for (const q of queries) {
-      const results = await paheSearch(q);
+      const results = await animetsuSearch(q);
       if (results.length > 0) {
-        paheAnime = results[0];
+        animetsuId = results[0].id;
         break;
       }
     }
 
-    if (paheAnime) {
-      const episodes = await paheGetAllEpisodes(paheAnime.session);
-      const ep = episodes.find(item => item.episode === e);
-      if (ep) {
-        const links = await paheExtractLinks(paheAnime.session, ep.session);
-        const best = links.find(l => l.quality.includes('1080')) || 
-                     links.find(l => l.quality.includes('720')) || 
-                     links[0];
-        
-        if (best) {
-          const m3u8 = await paheExtractM3U8(best.url);
-          if (m3u8) {
-            return {
-              streamUrl: m3u8,
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Referer': 'https://kwik.si/'
-              }
-            };
+    if (animetsuId) {
+      const m3u8 = await animetsuGetStream(animetsuId, e);
+      if (m3u8) {
+        return {
+          streamUrl: m3u8,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
+            'Referer': 'https://animetsu.live/'
           }
-        }
+        };
       }
     }
 
