@@ -50,3 +50,5 @@ export async function getVaplayerEpisodeStream(imdbId: string, season: number, e
   const res = await fetchVaplayer(url);
   return res?.data?.stream_urls?.[0] || null;
 }
+
+export const supportedTypes = ['movie', 'show'];

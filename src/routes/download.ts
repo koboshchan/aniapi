@@ -19,17 +19,38 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       streamUrl = vapData?.data?.stream_urls?.[0];
     }
 
-    if (!streamUrl) {
-      return reply.status(404).send({ error: 'No stream found for this movie' });
+    if (streamUrl) {
+      return {
+        streamUrl,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
+          'Referer': 'https://brightpathsignals.com/'
+        }
+      };
     }
 
-    return {
-      streamUrl,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-        'Referer': 'https://brightpathsignals.com/'
+    // 2. Fallback to Animetsu
+    console.log(`[Fallback] Vaplayer failed for movie ${imdbId}, trying Animetsu...`);
+    const meta = await fetchImdbMetadata(imdbId);
+    
+    // Sanitize title for movie search
+    const query = meta.title.split(/[:\-]/)[0].trim();
+    const results = await animetsuSearch(query);
+    
+    if (results.length > 0) {
+      const m3u8 = await animetsuGetStream(results[0].id, 1);
+      if (m3u8) {
+        return {
+          streamUrl: m3u8,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
+            'Referer': 'https://animetsu.live/'
+          }
+        };
       }
-    };
+    }
+
+    return reply.status(404).send({ error: 'No stream found for this movie' });
   });
 
   // Show download

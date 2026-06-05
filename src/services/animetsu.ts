@@ -41,9 +41,20 @@ const COMMON_HEADERS = {
 };
 
 export async function animetsuSearch(query: string): Promise<AnimetsuSearchResult[]> {
+  // Sanitize query: keep the part after the colon but stop at the first punctuation like , or .
+  let sanitizedQuery = query;
+  const colonIndex = query.indexOf(':');
+  if (colonIndex !== -1) {
+    const before = query.slice(0, colonIndex);
+    const after = query.slice(colonIndex + 1);
+    const firstPartAfter = after.split(/[.,]/)[0];
+    sanitizedQuery = `${before}:${firstPartAfter}`;
+  }
+  sanitizedQuery = sanitizedQuery.trim();
+  
   try {
     const res = await axios.get(`${ANIMETSU_BASE}/v2/api/anime/search/`, {
-      params: { query },
+      params: { query: sanitizedQuery },
       headers: COMMON_HEADERS,
       timeout: 15000
     });
@@ -73,3 +84,5 @@ export async function animetsuGetStream(animeId: string, epNum: number): Promise
     return null;
   }
 }
+
+export const supportedTypes = ['movie', 'show'];
