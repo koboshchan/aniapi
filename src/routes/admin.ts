@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { getApiKeysCollection } from '../services/mongodb.ts';
+import { getApiKeysCollection } from '../services/mongodb.js';
 import { randomBytes, createHash } from 'crypto';
-import { clearCache } from '../services/cache.ts';
+import { clearCache } from '../services/cache.js';
 
 const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   
@@ -131,6 +131,18 @@ const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           properties: {
             key: { type: 'string' },
             uses: { type: 'number' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
+          }
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
           }
         }
       },

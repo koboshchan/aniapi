@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { fetchImdbMetadata, isShowType } from '../services/metadata.ts';
-import { getVaplayerData } from '../services/vaplayer.ts';
-import { animetsuSearch } from '../services/animetsu.ts';
-import { getCache, setCache } from '../services/cache.ts';
+import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
+import { getVaplayerData } from '../services/vaplayer.js';
+import { animetsuSearch } from '../services/animetsu.js';
+import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
   fastify.get('/info/:imdbId', {

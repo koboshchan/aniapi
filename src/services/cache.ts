@@ -1,4 +1,4 @@
-import { getDb } from './mongodb.ts';
+import { getDb } from './mongodb.js';
 
 export async function getCache(key: string): Promise<any | null> {
   const db = getDb();

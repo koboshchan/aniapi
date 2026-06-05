@@ -3,10 +3,10 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { randomBytes, createHash } from 'crypto';
-import infoRoutes from './routes/info.ts';
-import downloadRoutes from './routes/download.ts';
-import adminRoutes from './routes/admin.ts';
-import { connectToDatabase, getApiKeysCollection } from './services/mongodb.ts';
+import infoRoutes from './routes/info.js';
+import downloadRoutes from './routes/download.js';
+import adminRoutes from './routes/admin.js';
+import { connectToDatabase, getApiKeysCollection } from './services/mongodb.js';
 
 // Generate Ephemeral Admin Key
 const rawAdminBytes = randomBytes(256);

@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.ts';
-import { fetchImdbMetadata } from '../services/metadata.ts';
-import { animetsuSearch, animetsuGetStream } from '../services/animetsu.ts';
-import { getCache, setCache } from '../services/cache.ts';
+import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
+import { fetchImdbMetadata } from '../services/metadata.js';
+import { animetsuSearch, animetsuGetStream } from '../services/animetsu.js';
+import { getCache, setCache } from '../services/cache.js';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
   
