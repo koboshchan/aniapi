@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    container_name: aniapi
     ports:
       - "3001:3000"
     environment:
