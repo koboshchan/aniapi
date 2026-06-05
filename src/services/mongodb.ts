@@ -20,9 +20,10 @@ export interface CacheEntry {
 
 export async function connectToDatabase() {
   try {
+    console.log(`Connecting to MongoDB at ${uri}...`);
     await client.connect();
     db = client.db();
-    console.log('Connected to MongoDB');
+    console.log('Connected to MongoDB successfully');
     
     // Ensure index on key
     await db.collection('api_keys').createIndex({ key: 1 }, { unique: true });
@@ -33,7 +34,8 @@ export async function connectToDatabase() {
     
     return db;
   } catch (error) {
-    console.error('Failed to connect to MongoDB', error);
+    console.error('CRITICAL: Failed to connect to MongoDB');
+    console.error(error);
     process.exit(1);
   }
 }
