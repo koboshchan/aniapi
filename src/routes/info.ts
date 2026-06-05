@@ -4,7 +4,35 @@ import { getVaplayerData } from '../services/vaplayer.ts';
 import { animetsuSearch } from '../services/animetsu.ts';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
-  fastify.get('/info/:imdbId', async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
+  fastify.get('/info/:imdbId', {
+    schema: {
+      description: 'Get metadata and stream/episode info for a movie or show by IMDb ID',
+      tags: ['metadata'],
+      params: {
+        type: 'object',
+        properties: {
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            imdbId: { type: 'string' },
+            title: { type: 'string' },
+            originalTitle: { type: 'string' },
+            type: { type: 'string' },
+            mediaType: { type: 'string' },
+            genres: { type: 'array', items: { type: 'string' } },
+            year: { type: 'number', nullable: true },
+            episodes: { type: 'object', additionalProperties: true, nullable: true },
+            hasPrimaryStream: { type: 'boolean' }
+          }
+        }
+      },
+      security: [{ apiKey: [] }]
+    }
+  }, async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
     const { imdbId } = request.params;
     
     const meta = await fetchImdbMetadata(imdbId);

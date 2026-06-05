@@ -6,7 +6,34 @@ import { animetsuSearch, animetsuGetStream } from '../services/animetsu.ts';
 export default async function downloadRoutes(fastify: FastifyInstance) {
   
   // Movie download
-  fastify.get('/download/movie/:imdbId', async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
+  fastify.get('/download/movie/:imdbId', {
+    schema: {
+      description: 'Get stream URL for a movie by IMDb ID',
+      tags: ['download'],
+      params: {
+        type: 'object',
+        properties: {
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            streamUrl: { type: 'string' },
+            headers: { type: 'object', additionalProperties: { type: 'string' } }
+          }
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
+          }
+        }
+      },
+      security: [{ apiKey: [] }]
+    }
+  }, async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
     const { imdbId } = request.params;
     
     // Try Vaplayer first
@@ -54,7 +81,36 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
   });
 
   // Show download
-  fastify.get('/download/show/:imdbId/:season/:episode', async (request: FastifyRequest<{ Params: { imdbId: string, season: string, episode: string } }>, reply: FastifyReply) => {
+  fastify.get('/download/show/:imdbId/:season/:episode', {
+    schema: {
+      description: 'Get stream URL for a specific episode of a show',
+      tags: ['download'],
+      params: {
+        type: 'object',
+        properties: {
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' },
+          season: { type: 'string', description: 'Season number' },
+          episode: { type: 'string', description: 'Episode number' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            streamUrl: { type: 'string' },
+            headers: { type: 'object', additionalProperties: { type: 'string' } }
+          }
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
+          }
+        }
+      },
+      security: [{ apiKey: [] }]
+    }
+  }, async (request: FastifyRequest<{ Params: { imdbId: string, season: string, episode: string } }>, reply: FastifyReply) => {
     const { imdbId, season, episode } = request.params;
     const s = parseInt(season);
     const e = parseInt(episode);
