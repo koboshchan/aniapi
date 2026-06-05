@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.ts';
 import { getVaplayerData } from '../services/vaplayer.ts';
 import { animetsuSearch } from '../services/animetsu.ts';
+import { getCache, setCache } from '../services/cache.ts';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
   fastify.get('/info/:imdbId', {
@@ -35,6 +36,11 @@ export default async function infoRoutes(fastify: FastifyInstance) {
   }, async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
     const { imdbId } = request.params;
     
+    // Check Cache
+    const cacheKey = `info:${imdbId}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return cached;
+
     const meta = await fetchImdbMetadata(imdbId);
     const isShow = isShowType(meta.type);
     const mediaType = isShow ? 'show' : 'movie';
@@ -63,7 +69,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       }
     }
 
-    return {
+    const result = {
       imdbId,
       title: meta.title,
       originalTitle: meta.originalTitle,
@@ -74,5 +80,10 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       episodes: episodes,
       hasPrimaryStream: !isShow ? stream_urls.length > 0 : episodes !== null
     };
+
+    // Cache for 48 hours
+    await setCache(cacheKey, result, 48 * 60 * 60);
+
+    return result;
   });
 }

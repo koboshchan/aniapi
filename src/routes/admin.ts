@@ -1,11 +1,31 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { getApiKeysCollection } from '../services/mongodb.ts';
 import { randomBytes, createHash } from 'crypto';
+import { clearCache } from '../services/cache.ts';
 
 const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   
   // Middleware to check admin key is handled globally in index.ts for simplicity
   // but we can also add a specific check here if needed.
+
+  fastify.post('/admin/cache/clear', {
+    schema: {
+      description: 'Clear all cached data',
+      tags: ['admin'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            message: { type: 'string' }
+          }
+        }
+      },
+      security: [{ adminKey: [] }]
+    }
+  }, async (request, reply) => {
+    await clearCache();
+    return { message: 'Cache cleared' };
+  });
 
   fastify.post('/admin/keys', {
     schema: {

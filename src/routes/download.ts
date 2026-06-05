@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.ts';
 import { fetchImdbMetadata } from '../services/metadata.ts';
 import { animetsuSearch, animetsuGetStream } from '../services/animetsu.ts';
+import { getCache, setCache } from '../services/cache.ts';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
   
@@ -35,6 +36,11 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
     const { imdbId } = request.params;
+
+    // Check Cache
+    const cacheKey = `download:movie:${imdbId}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return cached;
     
     // Try Vaplayer first
     let vapData = await getVaplayerData(imdbId, 'movie');
@@ -47,13 +53,15 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     }
 
     if (streamUrl) {
-      return {
+      const result = {
         streamUrl,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
           'Referer': 'https://brightpathsignals.com/'
         }
       };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
     }
 
     // 2. Fallback to Animetsu
@@ -67,13 +75,15 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     if (results.length > 0) {
       const m3u8 = await animetsuGetStream(results[0].id, 1);
       if (m3u8) {
-        return {
+        const result = {
           streamUrl: m3u8,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
             'Referer': 'https://animetsu.live/'
           }
         };
+        await setCache(cacheKey, result, 15 * 60);
+        return result;
       }
     }
 
@@ -115,17 +125,24 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const s = parseInt(season);
     const e = parseInt(episode);
 
+    // Check Cache
+    const cacheKey = `download:show:${imdbId}:${s}:${e}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return cached;
+
     // 1. Try Vaplayer
     let streamUrl = await getVaplayerEpisodeStream(imdbId, s, e);
     
     if (streamUrl) {
-      return {
+      const result = {
         streamUrl,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
           'Referer': 'https://brightpathsignals.com/'
         }
       };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
     }
 
     // 2. Fallback to Animetsu
@@ -149,13 +166,15 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     if (animetsuId) {
       const m3u8 = await animetsuGetStream(animetsuId, e);
       if (m3u8) {
-        return {
+        const result = {
           streamUrl: m3u8,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
             'Referer': 'https://animetsu.live/'
           }
         };
+        await setCache(cacheKey, result, 15 * 60);
+        return result;
       }
     }
 

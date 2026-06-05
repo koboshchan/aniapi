@@ -11,6 +11,13 @@ export interface ApiKey {
   createdAt: Date;
 }
 
+export interface CacheEntry {
+  key: string;
+  data: any;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 export async function connectToDatabase() {
   try {
     await client.connect();
@@ -19,6 +26,10 @@ export async function connectToDatabase() {
     
     // Ensure index on key
     await db.collection('api_keys').createIndex({ key: 1 }, { unique: true });
+    
+    // Ensure TTL index on expiresAt for cache
+    await db.collection('cache').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+    await db.collection('cache').createIndex({ key: 1 }, { unique: true });
     
     return db;
   } catch (error) {
