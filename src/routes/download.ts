@@ -42,13 +42,13 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cached = await getCache(cacheKey);
     if (cached) return cached;
     
-    // Try Vaplayer first
+    // Try Vaplayer first (Movie endpoint)
     let vapData = await getVaplayerData(imdbId, 'movie');
     let streamUrl = vapData?.data?.stream_urls?.[0];
     
-    // Fallback check (some movies are in movie endpoint, some in tv endpoint with eps:false)
-    if (!streamUrl && vapData?.data?.eps === false) {
-      vapData = await getVaplayerData(imdbId, 'movie');
+    // Fallback check to Vaplayer TV endpoint (some movies are in tv endpoint with eps:false)
+    if (!streamUrl) {
+      vapData = await getVaplayerData(imdbId, 'tv');
       streamUrl = vapData?.data?.stream_urls?.[0];
     }
 

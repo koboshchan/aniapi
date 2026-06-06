@@ -48,12 +48,23 @@ export default async function infoRoutes(fastify: FastifyInstance) {
     let episodes: any = null;
     let stream_urls: string[] = [];
 
+    // Try Vaplayer first, checking both endpoints if needed
     if (!isShow) {
-      const vapData = await getVaplayerData(imdbId, 'movie');
+      // Movie path: try movie endpoint then tv
+      let vapData = await getVaplayerData(imdbId, 'movie');
       stream_urls = vapData?.data?.stream_urls || [];
+      if (stream_urls.length === 0) {
+        vapData = await getVaplayerData(imdbId, 'tv');
+        stream_urls = vapData?.data?.stream_urls || [];
+      }
     } else {
-      const vapData = await getVaplayerData(imdbId, 'tv');
+      // Show path: try tv endpoint then movie (just in case)
+      let vapData = await getVaplayerData(imdbId, 'tv');
       episodes = vapData?.data?.eps || null;
+      if (!episodes) {
+        vapData = await getVaplayerData(imdbId, 'movie');
+        episodes = vapData?.data?.eps || null;
+      }
 
       // Fallback to Animetsu if Vaplayer has no episodes
       if (!episodes) {
