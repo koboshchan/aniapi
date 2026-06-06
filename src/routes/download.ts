@@ -14,7 +14,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' }
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567) or Animetsu ID (e.g. animetsu:id)' }
         }
       },
       response: {
@@ -41,6 +41,24 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cacheKey = `download:movie:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Animetsu ID directly
+    if (imdbId.startsWith('animetsu:')) {
+      const animetsuId = imdbId.split(':')[1];
+      const m3u8 = await animetsuGetStream(animetsuId, 1);
+      if (m3u8) {
+        const result = {
+          streamUrl: m3u8,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
+            'Referer': 'https://animetsu.live/'
+          }
+        };
+        await setCache(cacheKey, result, 15 * 60);
+        return result;
+      }
+      return reply.status(404).send({ error: 'No stream found for this Animetsu ID' });
+    }
     
     // Fetch metadata to determine media type
     const meta = await fetchImdbMetadata(imdbId);
@@ -105,7 +123,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' },
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567) or Animetsu ID (e.g. animetsu:id)' },
           season: { type: 'string', description: 'Season number' },
           episode: { type: 'string', description: 'Episode number' }
         }
@@ -136,6 +154,24 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cacheKey = `download:show:${imdbId}:${s}:${e}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Animetsu ID directly
+    if (imdbId.startsWith('animetsu:')) {
+      const animetsuId = imdbId.split(':')[1];
+      const m3u8 = await animetsuGetStream(animetsuId, e);
+      if (m3u8) {
+        const result = {
+          streamUrl: m3u8,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
+            'Referer': 'https://animetsu.live/'
+          }
+        };
+        await setCache(cacheKey, result, 15 * 60);
+        return result;
+      }
+      return reply.status(404).send({ error: 'No stream found for this Animetsu ID' });
+    }
 
     // Fetch metadata early
     const meta = await fetchImdbMetadata(imdbId);

@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
-import { animetsuSearch, findBestAnimetsuMatch } from '../services/animetsu.js';
+import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -40,6 +40,36 @@ export default async function infoRoutes(fastify: FastifyInstance) {
     const cacheKey = `info:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Animetsu ID directly
+    if (imdbId.startsWith('animetsu:')) {
+      const animetsuId = imdbId.split(':')[1];
+      const anime = await animetsuGetInfo(animetsuId);
+      
+      if (!anime) {
+        return reply.status(404).send({ error: 'Anime not found on Animetsu' });
+      }
+
+      // Format response to match standard info format
+      const isShow = anime.total_eps > 1;
+      const epArray = Array.from({ length: anime.total_eps }, (_, i) => (i + 1).toString());
+      const episodes = isShow ? { "1": epArray } : null;
+
+      const result = {
+        imdbId,
+        title: anime.title.english || anime.title.romaji,
+        originalTitle: anime.title.romaji || anime.title.english,
+        type: isShow ? 'show' : 'movie',
+        mediaType: isShow ? 'show' : 'movie',
+        genres: [], // Animetsu info doesn't always have genres in the same format
+        year: anime.year,
+        episodes: episodes,
+        hasPrimaryStream: true // If we have the ID, we assume it has streams on Animetsu
+      };
+
+      await setCache(cacheKey, result, 48 * 60 * 60);
+      return result;
+    }
 
     const meta = await fetchImdbMetadata(imdbId);
     const isShow = isShowType(meta.type);

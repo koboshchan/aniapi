@@ -73,6 +73,19 @@ export async function animetsuSearch(query: string): Promise<AnimetsuSearchResul
   return [];
 }
 
+export async function animetsuGetInfo(animeId: string): Promise<AnimetsuSearchResult | null> {
+  try {
+    const res = await axios.get(`${ANIMETSU_BASE}/v2/api/anime/info/${animeId}`, {
+      headers: COMMON_HEADERS,
+      timeout: 15000
+    });
+    return res.data || null;
+  } catch (e: any) {
+    console.error(`[Animetsu] GetInfo error for ${animeId}:`, e.message);
+    return null;
+  }
+}
+
 export function findBestAnimetsuMatch(results: AnimetsuSearchResult[], title: string, year?: number | null): AnimetsuSearchResult | null {
   if (!results.length) return null;
 
