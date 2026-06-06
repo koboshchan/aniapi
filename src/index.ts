@@ -6,6 +6,7 @@ import { randomBytes, createHash } from 'crypto';
 import infoRoutes from './routes/info.js';
 import downloadRoutes from './routes/download.js';
 import adminRoutes from './routes/admin.js';
+import subtitleRoutes from './routes/subtitles.js';
 import { connectToDatabase, getApiKeysCollection } from './services/mongodb.js';
 
 // Generate Ephemeral Admin Key
@@ -103,6 +104,7 @@ fastify.addHook('preHandler', async (request, reply) => {
 await fastify.register(infoRoutes);
 await fastify.register(downloadRoutes);
 await fastify.register(adminRoutes);
+await fastify.register(subtitleRoutes);
 
 // Health check
 fastify.get('/health', {
