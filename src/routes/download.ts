@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
-import { fetchImdbMetadata } from '../services/metadata.js';
+import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { animetsuSearch, animetsuGetStream, findBestAnimetsuMatch } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
@@ -42,15 +42,14 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cached = await getCache(cacheKey);
     if (cached) return cached;
     
-    // Try Vaplayer first (Movie endpoint)
-    let vapData = await getVaplayerData(imdbId, 'movie');
+    // Fetch metadata to determine media type
+    const meta = await fetchImdbMetadata(imdbId);
+    const isShow = isShowType(meta.type);
+    const vapType = isShow ? 'tv' : 'movie';
+
+    // 1. Try Vaplayer (Primary)
+    let vapData = await getVaplayerData(imdbId, vapType);
     let streamUrl = vapData?.data?.stream_urls?.[0];
-    
-    // Fallback check to Vaplayer TV endpoint (some movies are in tv endpoint with eps:false)
-    if (!streamUrl) {
-      vapData = await getVaplayerData(imdbId, 'tv');
-      streamUrl = vapData?.data?.stream_urls?.[0];
-    }
 
     if (streamUrl) {
       const result = {
@@ -66,7 +65,6 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
 
     // 2. Fallback to Animetsu
     console.log(`[Fallback] Vaplayer failed for movie ${imdbId}, trying Animetsu...`);
-    const meta = await fetchImdbMetadata(imdbId);
     
     // Try multiple queries: Full title, then original title
     const queries = [meta.title, meta.originalTitle].filter(Boolean);
@@ -138,7 +136,10 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
-    // 1. Try Vaplayer
+    // Fetch metadata early
+    const meta = await fetchImdbMetadata(imdbId);
+
+    // 1. Try Vaplayer (Primary)
     let streamUrl = await getVaplayerEpisodeStream(imdbId, s, e);
     
     if (streamUrl) {
@@ -155,7 +156,6 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
 
     // 2. Fallback to Animetsu
     console.log(`[Fallback] Vaplayer failed for ${imdbId} S${s}E${e}, trying Animetsu...`);
-    const meta = await fetchImdbMetadata(imdbId);
     
     // Simple search queries based on title
     const queries = s > 1 
