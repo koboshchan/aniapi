@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
 import { fetchImdbMetadata } from '../services/metadata.js';
-import { animetsuSearch, animetsuGetStream } from '../services/animetsu.js';
+import { animetsuSearch, animetsuGetStream, findBestAnimetsuMatch } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
@@ -68,12 +68,20 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     console.log(`[Fallback] Vaplayer failed for movie ${imdbId}, trying Animetsu...`);
     const meta = await fetchImdbMetadata(imdbId);
     
-    // Sanitize title for movie search
-    const query = meta.title.split(/[:\-]/)[0].trim();
-    const results = await animetsuSearch(query);
+    // Try multiple queries: Full title, then original title
+    const queries = [meta.title, meta.originalTitle].filter(Boolean);
+    let bestMatch = null;
+
+    for (const q of queries) {
+      // Basic sanitation for the search query itself
+      const searchQ = q.split(/[:\-]/)[0].trim();
+      const results = await animetsuSearch(searchQ);
+      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.year);
+      if (bestMatch) break;
+    }
     
-    if (results.length > 0) {
-      const m3u8 = await animetsuGetStream(results[0].id, 1);
+    if (bestMatch) {
+      const m3u8 = await animetsuGetStream(bestMatch.id, 1);
       if (m3u8) {
         const result = {
           streamUrl: m3u8,
@@ -151,20 +159,18 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     
     // Simple search queries based on title
     const queries = s > 1 
-      ? [`${meta.title} Season ${s}`, `${meta.title} ${s}nd Season`, meta.title]
-      : [meta.title];
+      ? [`${meta.title} Season ${s}`, `${meta.title} ${s}nd Season`, meta.title, meta.originalTitle]
+      : [meta.title, meta.originalTitle];
     
-    let animetsuId = null;
-    for (const q of queries) {
+    let bestMatch = null;
+    for (const q of queries.filter(Boolean)) {
       const results = await animetsuSearch(q);
-      if (results.length > 0) {
-        animetsuId = results[0].id;
-        break;
-      }
+      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.year);
+      if (bestMatch) break;
     }
 
-    if (animetsuId) {
-      const m3u8 = await animetsuGetStream(animetsuId, e);
+    if (bestMatch) {
+      const m3u8 = await animetsuGetStream(bestMatch.id, e);
       if (m3u8) {
         const result = {
           streamUrl: m3u8,

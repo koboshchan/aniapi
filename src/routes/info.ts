@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
-import { animetsuSearch } from '../services/animetsu.js';
+import { animetsuSearch, findBestAnimetsuMatch } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -59,8 +59,9 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       if (!episodes) {
         console.log(`[Info Fallback] Vaplayer has no episodes for ${imdbId}, checking Animetsu...`);
         const searchResults = await animetsuSearch(meta.title);
-        if (searchResults.length > 0) {
-          const match = searchResults[0];
+        const match = findBestAnimetsuMatch(searchResults, meta.title, meta.year);
+        
+        if (match) {
           // Generate an array of strings ["1", "2", ..., "N"] to match Vaplayer's format
           const epArray = Array.from({ length: match.total_eps }, (_, i) => (i + 1).toString());
           episodes = { "1": epArray };

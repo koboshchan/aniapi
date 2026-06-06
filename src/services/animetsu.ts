@@ -41,27 +41,75 @@ const COMMON_HEADERS = {
 };
 
 export async function animetsuSearch(query: string): Promise<AnimetsuSearchResult[]> {
-  // Sanitize query: keep the part after the colon but stop at the first punctuation like , or .
-  let sanitizedQuery = query;
-  const colonIndex = query.indexOf(':');
-  if (colonIndex !== -1) {
-    const before = query.slice(0, colonIndex);
-    const after = query.slice(colonIndex + 1);
-    const firstPartAfter = after.split(/[.,]/)[0];
-    sanitizedQuery = `${before}:${firstPartAfter}`;
-  }
-  sanitizedQuery = sanitizedQuery.trim();
+  // Try with full query first, then variations
+  const cleanQueries = (q: string) => {
+    const list = [q];
+    // If it has "The Movie", try just "Movie"
+    if (q.toLowerCase().includes('the movie')) {
+      list.push(q.replace(/the movie/i, 'Movie').trim());
+      list.push(q.replace(/the movie/i, '').trim());
+    }
+    // Remove colons and special chars for more variations
+    list.push(q.replace(/[:!]/g, '').trim());
+    return [...new Set(list)];
+  };
+
+  const queriesToTry = cleanQueries(query);
   
-  try {
-    const res = await axios.get(`${ANIMETSU_BASE}/v2/api/anime/search/`, {
-      params: { query: sanitizedQuery },
-      headers: COMMON_HEADERS,
-      timeout: 15000
-    });
-    return res.data?.results || [];
-  } catch (e: any) {
-    return [];
+  for (const q of queriesToTry) {
+    try {
+      const res = await axios.get(`${ANIMETSU_BASE}/v2/api/anime/search/`, {
+        params: { query: q },
+        headers: COMMON_HEADERS,
+        timeout: 15000
+      });
+      const results = res.data?.results || [];
+      if (results.length > 0) return results;
+    } catch (e: any) {
+      continue;
+    }
   }
+  
+  return [];
+}
+
+export function findBestAnimetsuMatch(results: AnimetsuSearchResult[], title: string, year?: number | null): AnimetsuSearchResult | null {
+  if (!results.length) return null;
+
+  const cleanTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const target = cleanTitle(title);
+
+  // 1. Try to find an exact match in title or romaji
+  for (const r of results) {
+    const rTitle = cleanTitle(r.title.english || '');
+    const rRomaji = cleanTitle(r.title.romaji || '');
+    
+    const titleMatch = rTitle === target || rRomaji === target;
+    const yearMatch = year ? r.year === year : true;
+
+    if (titleMatch && yearMatch) return r;
+  }
+
+  // 2. Try to find a partial match with year validation
+  for (const r of results) {
+    const rTitle = cleanTitle(r.title.english || '');
+    const rRomaji = cleanTitle(r.title.romaji || '');
+    
+    const partialMatch = rTitle.includes(target) || rRomaji.includes(target) || target.includes(rTitle) || target.includes(rRomaji);
+    const yearMatch = year ? r.year === year : false; // For partial match, require year if provided
+
+    if (partialMatch && yearMatch) return r;
+  }
+
+  // 3. Fallback to first result if it seems related
+  const first = results[0];
+  const firstTitle = cleanTitle(first.title.english || '');
+  const firstRomaji = cleanTitle(first.title.romaji || '');
+  if (firstTitle.includes(target.slice(0, 5)) || firstRomaji.includes(target.slice(0, 5))) {
+     return first;
+  }
+
+  return null;
 }
 
 export async function animetsuGetStream(animeId: string, epNum: number): Promise<string | null> {
