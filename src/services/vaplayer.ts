@@ -26,8 +26,11 @@ async function fetchVaplayer(url: string): Promise<any> {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-        'Referer': 'https://brightpathsignals.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+        'Referer': 'https://nextgencloudfabric.com/',
+        'Origin': 'https://nextgencloudfabric.com',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
       timeout: 30000,
       transformResponse: [(data) => data],

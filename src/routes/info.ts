@@ -79,7 +79,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       type: mediaType,
       mediaType: mediaType,
       genres: meta.genres,
-      year: meta.startYear,
+      year: (meta as any).startYear || (meta as any).year || null,
       episodes: episodes,
       hasPrimaryStream: !isShow ? stream_urls.length > 0 : episodes !== null
     };
