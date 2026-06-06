@@ -70,7 +70,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       if (!episodes) {
         console.log(`[Info Fallback] Vaplayer has no episodes for ${imdbId}, checking Animetsu...`);
         const searchResults = await animetsuSearch(meta.title);
-        const match = findBestAnimetsuMatch(searchResults, meta.title, meta.year);
+        const match = findBestAnimetsuMatch(searchResults, meta.title, meta.startYear);
         
         if (match) {
           // Generate an array of strings ["1", "2", ..., "N"] to match Vaplayer's format

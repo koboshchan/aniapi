@@ -76,7 +76,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       // Basic sanitation for the search query itself
       const searchQ = q.split(/[:\-]/)[0].trim();
       const results = await animetsuSearch(searchQ);
-      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.year);
+      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.startYear);
       if (bestMatch) break;
     }
     
@@ -165,7 +165,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     let bestMatch = null;
     for (const q of queries.filter(Boolean)) {
       const results = await animetsuSearch(q);
-      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.year);
+      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.startYear);
       if (bestMatch) break;
     }
 
