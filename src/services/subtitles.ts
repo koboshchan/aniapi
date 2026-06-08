@@ -53,6 +53,9 @@ const AD_PATTERNS = [
   ['Corrected by'],
   ['Provided by explosiveskull'],
   ['api.OpenSubtitles.org is deprecated'],
+  ['5 days of Hacking / Camping / Lectures', 'Join May Contain Hackers: MCH2022.org'],
+  ['Who are the real-world Illuminati ?', 'Find out @ saveanilluminati.com'],
+  ['Upgraded subtitles by JMH from multiple sources.'],
 ];
 
 class SubtitleCleaner {
@@ -91,6 +94,14 @@ class SubtitleCleaner {
 
     // Ad blocking
     content = content.replace(this.regex, "");
+
+    // Extra robust cleanup for known multiline ad variants found in stored files.
+    content = content
+      .replace(/\s*Support us and become VIP member\s*\r?\n\s*to remove all ads from (?:www\.)?OpenSubtitles\.org\s*/gi, '\n')
+      .replace(/\s*Please rate this subtitle at www\.osdb\.link\/[a-z0-9]+\s*\r?\n\s*Help other users to choose the best subtitles\s*/gi, '\n')
+      .replace(/\s*Who are the real-world Illuminati \?\s*\r?\n\s*Find out @ saveanilluminati\.com\s*/gi, '\n')
+      .replace(/\s*5 days of Hacking \/ Camping \/ Lectures\s*\r?\n\s*Join May Contain Hackers: MCH2022\.org\s*/gi, '\n')
+      .replace(/^\s*Upgraded subtitles by JMH from multiple sources\.\s*$/gim, '');
 
     // Repack: Remove BOM
     if (content.charCodeAt(0) === 0xFEFF) {
