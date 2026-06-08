@@ -1,14 +1,25 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { searchFeliratok, searchOpenSubtitlesLegacy, getFeliratokDownload, getOpenSubtitlesDownload, SubtitleResult } from '../services/subtitles.js';
+import { getSubtitlesFromDb, searchAndStoreMilahuSubtitles, getStoredSubtitle, SubtitleResult } from '../services/subtitles.js';
 import { fetchImdbMetadata } from '../services/metadata.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function subtitleRoutes(fastify: FastifyInstance) {
   
+  const processSubtitles = (subs: SubtitleResult[]) => {
+    return subs.map(sub => ({
+      language: sub.language,
+      format: sub.format,
+      filename: sub.filename,
+      url: `/subtitles/download/${sub.sha256}`,
+      source: sub.source,
+      rating: sub.downloads
+    }));
+  };
+
   // Show Subtitles
   fastify.get('/subtitles/show/:imdbId/:season/:episode', {
     schema: {
-      description: 'Get available subtitles for a show episode (via Feliratok.eu)',
+      description: 'Get all available subtitles for a show episode',
       tags: ['subtitles'],
       params: {
         type: 'object',
@@ -26,8 +37,10 @@ export default async function subtitleRoutes(fastify: FastifyInstance) {
             properties: {
               language: { type: 'string' },
               format: { type: 'string' },
+              filename: { type: 'string' },
               url: { type: 'string' },
-              source: { type: 'string' }
+              source: { type: 'string' },
+              rating: { type: 'number' }
             }
           }
         }
@@ -39,44 +52,31 @@ export default async function subtitleRoutes(fastify: FastifyInstance) {
     const s = parseInt(season);
     const e = parseInt(episode);
 
-    const cacheKey = `subs:show:${imdbId}:${s}:${e}`;
+    const cacheKey = `subs:show:v2:${imdbId}:${s}:${e}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
-    // Get metadata for title-based search
-    const meta = await fetchImdbMetadata(imdbId);
-    
-    // 1. Try Feliratok
-    let result = await searchFeliratok(meta.title, s, e);
-    
-    // 2. Try OpenSubtitles as fallback
+    // Check DB first
+    let result = await getSubtitlesFromDb(imdbId, 'episode', s, e);
+
     if (result.length === 0) {
-      result = await searchOpenSubtitlesLegacy(imdbId);
+      const meta = await fetchImdbMetadata(imdbId);
+      result = await searchAndStoreMilahuSubtitles(imdbId, 'episode', meta.title, s, e);
     }
 
-    const response = result.map(sub => ({
-      language: sub.language,
-      format: sub.format,
-      url: `/subtitles/download/${sub.source}/${sub.id}?${sub.source === 'opensubtitles' ? `link=${encodeURIComponent((sub as any).downloadLink)}&` : ''}ep=${e}`,
-      source: sub.source,
-      downloads: sub.downloads
-    }));
-
-    if (response.length === 0) {
+    if (result.length === 0) {
       return reply.code(404).send({ error: 'Subtitles not found' });
     }
 
-    // Only return the one with the most downloads
-    const bestResult = [response[0]];
-
-    await setCache(cacheKey, bestResult, 48 * 60 * 60); // 48 hours
-    return bestResult;
+    const response = processSubtitles(result);
+    await setCache(cacheKey, response, 24 * 60 * 60);
+    return response;
   });
 
   // Movie Subtitles
   fastify.get('/subtitles/movie/:imdbId', {
     schema: {
-      description: 'Get available subtitles for a movie (via OpenSubtitles)',
+      description: 'Get all available subtitles for a movie',
       tags: ['subtitles'],
       params: {
         type: 'object',
@@ -92,8 +92,10 @@ export default async function subtitleRoutes(fastify: FastifyInstance) {
             properties: {
               language: { type: 'string' },
               format: { type: 'string' },
+              filename: { type: 'string' },
               url: { type: 'string' },
-              source: { type: 'string' }
+              source: { type: 'string' },
+              rating: { type: 'number' }
             }
           }
         }
@@ -103,80 +105,50 @@ export default async function subtitleRoutes(fastify: FastifyInstance) {
   }, async (request: FastifyRequest<{ Params: { imdbId: string } }>, reply: FastifyReply) => {
     const { imdbId } = request.params;
 
-    const cacheKey = `subs:movie:${imdbId}`;
+    const cacheKey = `subs:movie:v2:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
-    // Get metadata for title-based search (required for Feliratok)
-    const meta = await fetchImdbMetadata(imdbId);
+    // Check DB first
+    let result = await getSubtitlesFromDb(imdbId, 'movie');
 
-    // 1. Try Feliratok first (consistent with shows)
-    let result = await searchFeliratok(meta.title, 0, 0);
-    
-    // 2. Try OpenSubtitles as primary/fallback for movies
-    const osResults = await searchOpenSubtitlesLegacy(imdbId);
-    
-    // Combine and sort by downloads
-    const combined: SubtitleResult[] = [...result, ...osResults].sort((a, b) => b.downloads - a.downloads);
-    
-    const response = combined.map(sub => ({
-      language: sub.language,
-      format: sub.format,
-      url: `/subtitles/download/${sub.source}/${sub.id}${sub.source === 'opensubtitles' ? `?link=${encodeURIComponent((sub as any).downloadLink)}` : ''}`,
-      source: sub.source,
-      downloads: sub.downloads
-    }));
+    if (result.length === 0) {
+      const meta = await fetchImdbMetadata(imdbId);
+      result = await searchAndStoreMilahuSubtitles(imdbId, 'movie', meta.title);
+    }
 
-    if (response.length === 0) {
+    if (result.length === 0) {
       return reply.code(404).send({ error: 'Subtitles not found' });
     }
 
-    // Only return the one with the most downloads
-    const bestResult = [response[0]];
-
-    await setCache(cacheKey, bestResult, 48 * 60 * 60); // 48 hours
-    return bestResult;
+    const response = processSubtitles(result);
+    await setCache(cacheKey, response, 24 * 60 * 60);
+    return response;
   });
 
-  // Download Proxy
-  fastify.get('/subtitles/download/:source/:id', {
+  // Download Route
+  fastify.get('/subtitles/download/:sha256', {
     schema: {
-      description: 'Download a subtitle file (proxied)',
+      description: 'Download a subtitle file by content hash',
       tags: ['subtitles'],
       params: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['feliratok', 'opensubtitles'] },
-          id: { type: 'string' }
+          sha256: { type: 'string' }
         }
-      },
-      querystring: {
-        type: 'object',
-        properties: {
-          link: { type: 'string' },
-          ep: { type: 'string' }
-        }
-      },
-      security: [{ apiKey: [] }]
+      }
     }
-  }, async (request: FastifyRequest<{ Params: { source: string, id: string }, Querystring: { link?: string, ep?: string } }>, reply: FastifyReply) => {
-    const { source, id } = request.params;
-    const { link, ep } = request.query;
-    
-    let buffer: Buffer | null = null;
-    
-    if (source === 'feliratok') {
-      buffer = await getFeliratokDownload(id, ep ? parseInt(ep) : undefined);
-    } else if (source === 'opensubtitles' && link) {
-      buffer = await getOpenSubtitlesDownload(link);
-    }
+  }, async (request: FastifyRequest<{ Params: { sha256: string } }>, reply: FastifyReply) => {
+    const { sha256 } = request.params;
+    const buffer = await getStoredSubtitle(sha256);
 
     if (!buffer) {
       return reply.code(404).send({ error: 'Subtitle file not found' });
     }
 
-    reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename="subtitle-${id}.srt"`);
-    return reply.send(buffer);
+    reply.header('Content-Type', 'text/plain; charset=utf-8');
+    // We don't have the original filename here easily without a DB lookup, 
+    // but the client can set it or we can just return the data.
+    return buffer;
   });
 }

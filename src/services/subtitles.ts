@@ -1,346 +1,266 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
-import zlib from 'zlib';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { execSync } from 'child_process';
+import { getDb } from './mongodb.js';
 
-const SUB_BASE = 'https://feliratok.eu/index.php';
-const OS_REST_URL = 'https://rest.opensubtitles.org/search';
+const MILAHU_API_URL = 'http://milahu.duckdns.org/bin/get-subtitles';
+const STORAGE_BASE = path.join(process.cwd(), 'data');
 
 export interface SubtitleResult {
-  id: string;
+  id: string; // The filename or an ID from the source
   language: string;
   format: string;
   filename: string;
-  source: 'feliratok' | 'opensubtitles';
-  downloads: number;
+  source: 'milahu';
+  downloads: number; // Used as rating/popularity
+  sha256?: string;
 }
 
-const LANG_ISO = {
-  English: 'eng',    Hungarian: 'hun', French: 'fre',  German: 'ger',
-  Spanish: 'spa',    Italian: 'ita',   Portuguese: 'por', Russian: 'rus',
-  Japanese: 'jpn',   Chinese: 'chi',   Korean: 'kor',  Dutch: 'dut',
-  Polish: 'pol',     Swedish: 'swe',   Norwegian: 'nor', Danish: 'dan',
-  Finnish: 'fin',    Czech: 'cze',     Romanian: 'rum', Turkish: 'tur',
-  Arabic: 'ara',     Hebrew: 'heb',    Greek: 'ell',   Ukrainian: 'ukr',
-};
-
-const LANG_HUN = {
-  English: 'angol',    Hungarian: 'magyar',   Spanish: 'spanyol',
-  French: 'francia',   German: 'német',       Italian: 'olasz',
-  Japanese: 'japán',   Portuguese: 'portugál', Russian: 'orosz',
-  Chinese: 'kínai',    Korean: 'koreai',      Arabic: 'arab',
-  Dutch: 'holland',    Polish: 'lengyel',     Turkish: 'török',
-  Romanian: 'román',   Croatian: 'horvát',    Serbian: 'szerb',
-  Czech: 'cseh',       Greek: 'görög',        Swedish: 'svéd',
-  Norwegian: 'norvég', Danish: 'dán',         Finnish: 'finn',
-};
-
-function langToISO639(lang: string): string {
-  return (LANG_ISO as any)[lang] || 'eng';
+export interface SubtitleMetadata extends SubtitleResult {
+  imdbId: string;
+  type: 'movie' | 'episode';
+  season?: number;
+  episode?: number;
+  storedPath: string;
+  createdAt: Date;
 }
 
-function engToHun(lang: string): string {
-  return (LANG_HUN as any)[lang] || '';
-}
+// ── Adblocker Patterns (Ported from milahu/opensubtitles-scraper) ──────────
 
-// ── Feliratok.eu ──────────────────────────────────────────────────────────────
+const AD_PATTERNS = [
+  ['-== [ www.OpenSubtitles.com ] ==-'],
+  ['-== [ www.OpenSubtitles.org ] ==-'],
+  ['-== [ www.OpenSubtitles.net ] ==-'],
+  ['-= www.OpenSubtitles.org =-'],
+  ['Support us and become VIP member', 'to remove all ads from www.OpenSubtitles.org'],
+  ['Support us and become VIP member', 'to remove all ads from OpenSubtitles.org'],
+  ['Advertise your product or brand here', 'contact www.OpenSubtitles.org today'],
+  ['Please rate this subtitle at www.osdb.link', 'Help other users to choose the best subtitles'],
+  ['Watch any video online with Open-SUBTITLES', 'Free Browser extension: osdb.link/ext'],
+  ['Subtitle by', 'www.addic7ed.com'],
+  ['Sync and corrections by', 'addic7ed.com'],
+  ['Downloaded From www.AllSubs.org'],
+  ['www.faghoes.tk'],
+  ['Subtitles by', 'SDI Media Group'],
+  ['Synced by', 'meisam_t72'],
+  ['www.phreex.net'],
+  ['www.titlovi.com'],
+  ['Preuzeto sa www.titlovi.com'],
+  ['Translation by'],
+  ['Resync by'],
+  ['Corrected by'],
+  ['Provided by explosiveskull'],
+  ['api.OpenSubtitles.org is deprecated'],
+];
 
-export async function searchFeliratok(title: string, season: number, episode: number, lang: string = 'English'): Promise<SubtitleResult[]> {
-  try {
-    const lookupTitle = title.replace(/ \(\d{4}\)$/, '').replace(/ \d{4}$/, '').trim();
-    const hunLang = engToHun(lang);
-    
-    // 1. Autoname lookup
-    const autoResp = await axios.get(`${SUB_BASE}?action=autoname&nyelv=0&term=${encodeURIComponent(lookupTitle)}`, {
-      headers: { 'User-Agent': 'xbmc subtitle plugin' }
+class SubtitleCleaner {
+  private regex: RegExp;
+
+  constructor() {
+    const lineSep = "(?:\\n|\\r\\n|\\r|\\\\N|\\|)";
+    const lineEnd = "(?:\\n|\\r\\n|\\r|\\\\N|\\||$)";
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const parts = AD_PATTERNS.map(lines => {
+      const lineGroup = lines.map(l => escape(l)).join(lineSep);
+      return `(?:${lineGroup}${lineEnd})`;
     });
-    
-    const autoData = autoResp.data;
-    if (!Array.isArray(autoData) || !autoData.length || autoData[0]?.ID === '-100x') return [];
 
-    let showId = autoData[0].ID;
-    for (const entry of autoData) {
-      if (entry.ID !== '-100x' && parseInt(entry.ID) > parseInt(showId)) showId = entry.ID;
+    this.regex = new RegExp(parts.join("|"), "gi");
+  }
+
+  private detectEncoding(buffer: Buffer): string {
+    try {
+      const tmpPath = `/tmp/enc_detect_${Date.now()}`;
+      fs.writeFileSync(tmpPath, buffer);
+      // macOS 'file -I' or Linux 'file -i'
+      const output = execSync(`file -I "${tmpPath}"`).toString();
+      fs.unlinkSync(tmpPath);
+      const match = output.match(/charset=([^;\s\n]+)/);
+      return match ? match[1] : 'utf-8';
+    } catch {
+      return 'utf-8';
+    }
+  }
+
+  public clean(buffer: Buffer, filename: string): { content: Buffer; format: string } {
+    const encoding = this.detectEncoding(buffer);
+    let content = buffer.toString(encoding as any);
+
+    // Ad blocking
+    content = content.replace(this.regex, "");
+
+    // Repack: Remove BOM
+    if (content.charCodeAt(0) === 0xFEFF) {
+      content = content.slice(1);
     }
 
-    // 2. Search
-    let searchParams = `action=search&sid=${showId}`;
-    if (season > 0) searchParams += `&ev=${season}`;
-    if (episode > 0) searchParams += `&epizod=${episode}`;
-    if (hunLang) searchParams += `&nyelv=${encodeURIComponent(hunLang)}`;
-
-    const htmlResp = await axios.get(`${SUB_BASE}?${searchParams}`, {
-      headers: { 'User-Agent': 'xbmc subtitle plugin' }
-    });
-    
-    const html = htmlResp.data;
-    const results: SubtitleResult[] = [];
-    const $ = cheerio.load(html);
-
-    // Try to parse using cheerio for better results including downloads
-    $('tr.kozep, tr.vilagos').each((_i, el) => {
-      const row = $(el);
-      const links = row.find('a[href*="fnev="]');
-      if (links.length > 0) {
-        const href = links.attr('href') || '';
-        const fnevMatch = href.match(/fnev=([^&" \n\r]+)/);
-        const idMatch = href.match(/felirat=([^&" \n\r]+)/);
-        
-        if (fnevMatch && idMatch) {
-          const filename = decodeURIComponent(fnevMatch[1]);
-          const subId = idMatch[1];
-          
-          // Download count is usually in a td with a specific index or pattern
-          // We search for a text that looks like a number in the row
-          let downloads = 0;
-          row.find('td').each((_j, td) => {
-            const text = $(td).text().trim();
-            // Look for "Letöltve: X" or just a pure number in a specific column
-            if (text.match(/^\d+$/)) {
-              downloads = Math.max(downloads, parseInt(text));
-            }
-          });
-
-          results.push({
-            id: subId,
-            language: lang,
-            format: filename.slice(-3).toLowerCase(),
-            filename: filename,
-            source: 'feliratok',
-            downloads: downloads
-          });
-        }
-      }
-    });
-
-    // Fallback to manual parser if cheerio failed to find rows
-    if (results.length === 0) {
-      const TERMS = '"&\r\n';
-      let pos = 0;
-      while (true) {
-        const fnevIdx = html.indexOf('fnev=', pos);
-        if (fnevIdx === -1) break;
-        const fnevStart = fnevIdx + 5;
-        let fnevEnd = -1;
-        for (let i = fnevStart; i < html.length; i++) {
-          if (TERMS.includes(html[i])) { fnevEnd = i; break; }
-        }
-        if (fnevEnd === -1) break;
-        const filename = html.slice(fnevStart, fnevEnd);
-
-        const idIdx = html.indexOf('felirat=', fnevEnd);
-        if (idIdx === -1) break;
-        const idStart = idIdx + 8;
-        let idEnd = -1;
-        for (let i = idStart; i < html.length; i++) {
-          if (TERMS.includes(html[i])) { idEnd = i; break; }
-        }
-        if (idEnd === -1) break;
-        const subId = html.slice(idStart, idEnd);
-
-        results.push({
-          id: subId,
-          language: lang,
-          format: filename.slice(-3).toLowerCase(),
-          filename: filename,
-          source: 'feliratok',
-          downloads: 0
-        });
-        pos = idEnd;
-      }
+    // Repack: Fix extension for TXT if it looks like MicroDVD or SRT
+    let format = path.extname(filename).slice(1).toLowerCase();
+    if (format === 'txt' && (/\{\d+\}\{\d+\}/.test(content) || /^\d+\s+\d{2}:\d{2}:\d{2}/.test(content))) {
+      format = content.includes('-->') ? 'srt' : 'sub';
     }
 
-    return results.sort((a, b) => b.downloads - a.downloads);
-  } catch (error) {
-    console.error('[Feliratok] Search failed:', error);
-    return [];
+    return {
+      content: Buffer.from(content, 'utf-8'),
+      format
+    };
   }
 }
 
-// ── OpenSubtitles (Legacy REST) ───────────────────────────────────────────────
+const cleaner = new SubtitleCleaner();
 
-export async function searchOpenSubtitlesLegacy(imdbId: string, lang: string = 'English'): Promise<SubtitleResult[]> {
-  try {
-    let imdbNum = imdbId.startsWith('tt') ? imdbId.slice(2) : imdbId;
-    imdbNum = imdbNum.replace(/^0+/, '');
-    const langCode = langToISO639(lang);
-    
-    const searchURL = `${OS_REST_URL}/imdbid-${imdbNum}/sublanguageid-${langCode}`;
-    const res = await axios.get(searchURL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0',
-        'X-User-Agent': 'trailers.to-UA',
-        'Accept': '*/*',
-        'Referer': 'https://brightpathsignals.com/',
-      }
-    });
+// ── Storage & Hashing ───────────────────────────────────────────────────────
 
-    const data = res.data;
-    if (!Array.isArray(data)) return [];
-
-    return data.map((s: any) => ({
-      id: s.IDSubtitleFile,
-      language: s.LanguageName || lang,
-      format: 'srt',
-      filename: s.SubFileName,
-      source: 'opensubtitles' as const,
-      downloadLink: s.SubDownloadLink,
-      downloads: parseInt(s.SubDownloadsCnt || '0')
-    })).sort((a, b) => b.downloads - a.downloads);
-  } catch (error) {
-    console.error('[OpenSubtitles] Search failed:', error);
-    return [];
-  }
+function getSha256(buffer: Buffer): string {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-// ── Download Helpers ──────────────────────────────────────────────────────────
+async function storeSubtitleFile(buffer: Buffer): Promise<{ sha256: string; path: string }> {
+  const hash = getSha256(buffer);
+  const prefix = hash.substring(0, 2);
+  const dir = path.join(STORAGE_BASE, prefix);
+  const fullPath = path.join(dir, hash);
 
-function walkDir(dir: string, depth: number = 0): string[] {
-  if (depth > 5) return [];
-  const files: string[] = [];
-  try {
-    for (const entry of fs.readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      try {
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) {
-          files.push(...walkDir(full, depth + 1));
-        } else if (/\.(srt|sub)$/i.test(entry)) {
-          files.push(full);
-        }
-      } catch {}
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  if (!fs.existsSync(fullPath)) {
+    fs.writeFileSync(fullPath, buffer);
+  }
+
+  return { sha256: hash, path: fullPath };
+}
+
+export async function getStoredSubtitle(sha256: string): Promise<Buffer | null> {
+  const prefix = sha256.substring(0, 2);
+  const fullPath = path.join(STORAGE_BASE, prefix, sha256);
+  if (fs.existsSync(fullPath)) {
+    return fs.readFileSync(fullPath);
+  }
+  return null;
+}
+
+// ── Milahu Service ──────────────────────────────────────────────────────────
+
+function walkDir(dir: string): string[] {
+  let files: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files = files.concat(walkDir(full));
+    } else {
+      files.push(full);
     }
-  } catch {}
+  }
   return files;
 }
 
-function findEpisodeSubtitle(extractDir: string, episode: number): string {
-  const files = walkDir(extractDir);
-  if (!files.length) return '';
-
-  const ep2 = String(episode).padStart(2, '0');
-  const ep1 = String(episode);
-  let best = '';
-  let bestScore = -1;
-
-  for (const f of files) {
-    const lf = f.toLowerCase();
-    let score = 0;
-    if (lf.includes(`- ${ep2} -`)) score = 10;
-    else if (lf.includes(`e${ep2}`)) score = 9;
-    else if (lf.includes(`_${ep2}_`)) score = 8;
-    else if (lf.includes(`.${ep2}.`)) score = 7;
-    else if (lf.includes(`- ${ep1} -`)) score = 6;
-    else if (lf.includes(`e${ep1}.`)) score = 5;
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = f;
-    } else if (bestScore < 0) best = f;
-  }
-  return best;
-}
-
-export async function getFeliratokDownload(subId: string, episode?: number): Promise<Buffer | null> {
+export async function searchAndStoreMilahuSubtitles(imdbId: string, type: 'movie' | 'episode', title: string, season?: number, episode?: number): Promise<SubtitleResult[]> {
   try {
-    const dlURL = `${SUB_BASE}?action=letolt&felirat=${subId}`;
-    console.log(`[Feliratok] Downloading subtitle ${subId} for episode ${episode}...`);
-    const res = await axios.get(dlURL, {
-      headers: { 'User-Agent': 'xbmc subtitle plugin' },
-      responseType: 'arraybuffer'
-    });
-    
-    const buffer = Buffer.from(res.data);
-    
-    // Better detection using magic bytes
-    const isZip = buffer[0] === 0x50 && buffer[1] === 0x4B; // PK
-    const isRar = buffer[0] === 0x52 && buffer[1] === 0x61 && buffer[2] === 0x72 && buffer[3] === 0x21; // Rar!
-    
-    if (isZip || isRar) {
-      console.log(`[Feliratok] Detected archive format: ${isZip ? 'ZIP' : 'RAR'}`);
-      const tmpPath = `/tmp/aniapi_sub_${subId}.${isZip ? 'zip' : 'rar'}`;
-      const extractDir = `/tmp/aniapi_sub_ext_${subId}`;
-      
-      fs.writeFileSync(tmpPath, buffer);
-      
-      if (fs.existsSync(extractDir)) {
-        fs.rmSync(extractDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(extractDir, { recursive: true });
-      
-      try {
-        console.log(`[Feliratok] Extracting archive to ${extractDir}...`);
-        
-        if (isRar) {
-          // unrar x: Extract with full paths
-          // -y: Assume Yes
-          // -idq: Quiet mode
-          console.log(`[Feliratok] Using unrar for RAR extraction`);
-          execSync(`unrar x "${tmpPath}" "${extractDir}/" -y -idq`, { stdio: 'pipe' });
-        } else {
-          // 7z x: Extract with full paths
-          // -o: Output directory
-          // -y: Assume Yes
-          console.log(`[Feliratok] Using 7z for ZIP extraction`);
-          execSync(`7z x "${tmpPath}" -o"${extractDir}" -y`, { stdio: 'pipe' });
-        }
-        
-        const subFile = findEpisodeSubtitle(extractDir, episode || 1);
-        if (subFile && fs.existsSync(subFile)) {
-          console.log(`[Feliratok] Found matching subtitle file: ${subFile}`);
-          const content = fs.readFileSync(subFile);
-          // Cleanup
-          fs.rmSync(extractDir, { recursive: true, force: true });
-          fs.unlinkSync(tmpPath);
-          return content;
-        } else {
-          console.log(`[Feliratok] No matching subtitle file found for episode ${episode} in archive.`);
-          // List files to help debug
-          const allFiles = walkDir(extractDir);
-          console.log(`[Feliratok] Files in archive: ${allFiles.join(', ')}`);
-        }
-      } catch (e: any) {
-        console.error('[Feliratok] Extraction failed:', e.message);
-        if (e.stdout) console.error('7z stdout:', e.stdout.toString());
-        if (e.stderr) console.error('7z stderr:', e.stderr.toString());
-      }
-      
-      // Cleanup on failure
-      if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-      
-      // If we are here, we failed to get a specific file from the archive.
-      // We should NOT return the binary archive as it's not what the user wants.
-      return null; 
+    const payload: any = { type, title: title.replace(/ \(\d{4}\)$/, '').trim() };
+    if (type === 'episode') {
+      payload.season = season;
+      payload.episode = episode;
+    } else {
+      const yearMatch = title.match(/\((\d{4})\)$/);
+      if (yearMatch) payload.year = parseInt(yearMatch[1]);
     }
 
-    return buffer;
-  } catch (error) {
-    console.error('[Feliratok] Download failed:', error);
-    return null;
-  }
-}
-
-export async function getOpenSubtitlesDownload(downloadLink: string): Promise<Buffer | null> {
-  try {
-    const res = await axios.get(downloadLink, {
-      headers: {
-        'User-Agent': 'xbmc subtitle plugin',
-        'Accept': '*/*',
-      },
-      responseType: 'arraybuffer'
+    console.log(`[Milahu] Requesting for: ${JSON.stringify(payload)}`);
+    const res = await axios.get(MILAHU_API_URL, {
+      params: { 'video-parsed-json': JSON.stringify(payload) },
+      responseType: 'arraybuffer',
+      timeout: 45000
     });
-    
-    // Decompress if it's GZIP
+
+    const tmpZip = `/tmp/mil_sub_${Date.now()}.zip`;
+    const tmpDir = `/tmp/mil_ext_${Date.now()}`;
+    fs.writeFileSync(tmpZip, Buffer.from(res.data));
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const results: SubtitleResult[] = [];
+    const db = getDb();
+
     try {
-      return zlib.gunzipSync(Buffer.from(res.data));
-    } catch {
-      return Buffer.from(res.data);
+      execSync(`unzip -o "${tmpZip}" -d "${tmpDir}"`, { stdio: 'pipe' });
+      const files = walkDir(tmpDir);
+
+      for (const f of files) {
+        const ext = path.extname(f).toLowerCase();
+        if (!['.srt', '.ass', '.ssa', '.sub', '.vtt', '.txt'].includes(ext)) continue;
+
+        const buffer = fs.readFileSync(f);
+        const { content, format } = cleaner.clean(buffer, f);
+        const { sha256, path: storedPath } = await storeSubtitleFile(content);
+        
+        const idMatch = f.match(/\.(\d{8,})\./);
+        const popularity = idMatch ? parseInt(idMatch[1]) : 0;
+        const filename = path.basename(f);
+
+        const metadata: SubtitleMetadata = {
+          id: filename,
+          language: f.toLowerCase().includes('.hun.') ? 'Hungarian' : 'English',
+          format,
+          filename,
+          source: 'milahu',
+          downloads: popularity,
+          sha256,
+          imdbId,
+          type,
+          season,
+          episode,
+          storedPath,
+          createdAt: new Date()
+        };
+
+        // Upsert metadata by SHA256 to handle duplicates across different media if they occur
+        await db.collection('subtitles').updateOne(
+          { sha256, imdbId, type, season, episode },
+          { $set: metadata },
+          { upsert: true }
+        );
+
+        results.push({
+          id: filename,
+          language: metadata.language,
+          format: metadata.format,
+          filename: metadata.filename,
+          source: metadata.source,
+          downloads: metadata.downloads,
+          sha256: metadata.sha256
+        });
+      }
+    } finally {
+      if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+      if (fs.existsSync(tmpZip)) fs.unlinkSync(tmpZip);
     }
-  } catch (error) {
-    console.error('[OpenSubtitles] Download failed:', error);
-    return null;
+
+    return results.sort((a, b) => b.downloads - a.downloads);
+  } catch (error: any) {
+    console.error('[Milahu] Fetch/Process failed:', error.message);
+    return [];
   }
+}
+
+export async function getSubtitlesFromDb(imdbId: string, type: 'movie' | 'episode', season?: number, episode?: number): Promise<SubtitleResult[]> {
+  const db = getDb();
+  const query: any = { imdbId, type };
+  if (season !== undefined) query.season = season;
+  if (episode !== undefined) query.episode = episode;
+
+  const stored = await db.collection<SubtitleMetadata>('subtitles').find(query).toArray();
+  return stored.map(s => ({
+    id: s.filename,
+    language: s.language,
+    format: s.format,
+    filename: s.filename,
+    source: s.source,
+    downloads: s.downloads,
+    sha256: s.sha256
+  })).sort((a, b) => b.downloads - a.downloads);
 }

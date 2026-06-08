@@ -31,6 +31,10 @@ export async function connectToDatabase() {
     // Ensure TTL index on expiresAt for cache
     await db.collection('cache').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
     await db.collection('cache').createIndex({ key: 1 }, { unique: true });
+
+    // Subtitle Indexes
+    await db.collection('subtitles').createIndex({ imdbId: 1, type: 1, season: 1, episode: 1 });
+    await db.collection('subtitles').createIndex({ sha256: 1 }, { unique: true });
     
     return db;
   } catch (error) {
