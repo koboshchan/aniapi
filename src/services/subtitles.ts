@@ -13,7 +13,7 @@ export interface SubtitleResult {
   language: string;
   format: string;
   filename: string;
-  source: 'milahu';
+  source: 'milahu' | 'anikoto';
   downloads: number; // Used as rating/popularity
   sha256?: string;
 }
@@ -153,6 +153,39 @@ export async function getStoredSubtitle(sha256: string): Promise<Buffer | null> 
     return fs.readFileSync(fullPath);
   }
   return null;
+}
+
+export async function storeExternalSubtitleFromUrl(url: string): Promise<{ sha256: string; format: string; filename: string } | null> {
+  try {
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0',
+        'Accept': '*/*'
+      },
+      timeout: 30000
+    });
+
+    const buffer = Buffer.from(response.data);
+    const pathname = (() => {
+      try {
+        return new URL(url).pathname;
+      } catch {
+        return '/subtitle.vtt';
+      }
+    })();
+    const filename = path.basename(pathname) || 'subtitle.vtt';
+    const cleaned = cleaner.clean(buffer, filename);
+    const stored = await storeSubtitleFile(cleaned.content);
+
+    return {
+      sha256: stored.sha256,
+      format: cleaned.format,
+      filename
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Milahu Service ──────────────────────────────────────────────────────────

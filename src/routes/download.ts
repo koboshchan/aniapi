@@ -2,9 +2,45 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { animetsuGetStream, animetsuResolveSeasonId } from '../services/animetsu.js';
+import { anikotoGetEpisodeStream, parseAnikotoId } from '../services/anikoto.js';
+import { storeExternalSubtitleFromUrl } from '../services/subtitles.js';
+import { getDb } from '../services/mongodb.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
+
+  async function persistSubtitleMetadata(
+    imdbId: string,
+    mediaType: 'movie' | 'episode',
+    sha256: string,
+    filename: string,
+    format: string,
+    season?: number,
+    episode?: number
+  ) {
+    const db = getDb();
+    await db.collection('subtitles').updateOne(
+      { sha256, imdbId, type: mediaType, season, episode },
+      {
+        $set: {
+          id: filename,
+          language: 'English',
+          format,
+          filename,
+          source: 'anikoto',
+          downloads: 0,
+          sha256,
+          imdbId,
+          type: mediaType,
+          season,
+          episode,
+          storedPath: '',
+          createdAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+  }
   
   // Movie download
   fastify.get('/download/movie/:imdbId', {
@@ -14,7 +50,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567) or Animetsu ID (e.g. animetsu:id)' }
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (e.g. animetsu:id), or Anikoto ID (e.g. anikoto:id[:sub/dub])' }
         }
       },
       response: {
@@ -22,6 +58,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
           type: 'object',
           properties: {
             streamUrl: { type: 'string' },
+            sub: { type: ['string', 'null'] },
             headers: { type: 'object', additionalProperties: { type: 'string' } }
           }
         },
@@ -42,6 +79,36 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
+    // Handle Anikoto ID directly (movie treated as episode 1)
+    if (imdbId.startsWith('anikoto:')) {
+      const parsed = parseAnikotoId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Anikoto ID format' });
+      }
+
+      const resolved = await anikotoGetEpisodeStream(parsed.slug, 1, 1, parsed.audioType);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'No stream found for this Anikoto ID' });
+      }
+
+      let sub: string | null = null;
+      if (resolved.subtitleUrl) {
+        const stored = await storeExternalSubtitleFromUrl(resolved.subtitleUrl);
+        if (stored?.sha256) {
+          sub = `/subtitles/download/${stored.sha256}`;
+          await persistSubtitleMetadata(imdbId, 'movie', stored.sha256, stored.filename, stored.format);
+        }
+      }
+
+      const result = {
+        streamUrl: resolved.streamUrl,
+        sub,
+        headers: resolved.headers
+      };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
+    }
+
     // Handle Animetsu ID directly
     if (imdbId.startsWith('animetsu:')) {
       const animetsuId = imdbId.split(':')[1];
@@ -49,6 +116,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       if (m3u8) {
         const result = {
           streamUrl: m3u8,
+          sub: null,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
             'Referer': 'https://animetsu.net/'
@@ -72,6 +140,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     if (streamUrl) {
       const result = {
         streamUrl,
+        sub: null,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
           'Referer': 'https://nextgencloudfabric.com/',
@@ -93,7 +162,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567) or Animetsu ID (e.g. animetsu:id)' },
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (e.g. animetsu:id), or Anikoto ID (e.g. anikoto:id[:sub/dub])' },
           season: { type: 'string', description: 'Season number' },
           episode: { type: 'string', description: 'Episode number' }
         }
@@ -103,6 +172,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
           type: 'object',
           properties: {
             streamUrl: { type: 'string' },
+            sub: { type: ['string', 'null'] },
             headers: { type: 'object', additionalProperties: { type: 'string' } }
           }
         },
@@ -125,6 +195,36 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
+    // Handle Anikoto ID directly
+    if (imdbId.startsWith('anikoto:')) {
+      const parsed = parseAnikotoId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Anikoto ID format' });
+      }
+
+      const resolved = await anikotoGetEpisodeStream(parsed.slug, s, e, parsed.audioType);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'No stream found for this Anikoto ID' });
+      }
+
+      let sub: string | null = null;
+      if (resolved.subtitleUrl) {
+        const stored = await storeExternalSubtitleFromUrl(resolved.subtitleUrl);
+        if (stored?.sha256) {
+          sub = `/subtitles/download/${stored.sha256}`;
+          await persistSubtitleMetadata(imdbId, 'episode', stored.sha256, stored.filename, stored.format, s, e);
+        }
+      }
+
+      const result = {
+        streamUrl: resolved.streamUrl,
+        sub,
+        headers: resolved.headers
+      };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
+    }
+
     // Handle Animetsu ID directly
     if (imdbId.startsWith('animetsu:')) {
       const animetsuId = imdbId.split(':')[1];
@@ -133,6 +233,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       if (m3u8) {
         const result = {
           streamUrl: m3u8,
+          sub: null,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
             'Referer': 'https://animetsu.net/'
@@ -150,6 +251,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     if (streamUrl) {
       const result = {
         streamUrl,
+        sub: null,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
           'Referer': 'https://nextgencloudfabric.com/',
