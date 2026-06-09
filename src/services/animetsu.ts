@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const ANIMETSU_BASE = 'https://animetsu.live';
+const ANIMETSU_BASE = 'https://animetsu.net';
 const PROXY_BASE = 'https://swiftstream.top/proxy';
 
 export interface AnimetsuSearchResult {
@@ -12,6 +12,31 @@ export interface AnimetsuSearchResult {
   };
   total_eps: number;
   year: number;
+}
+
+export interface AnimetsuInfoSeason {
+  id: string;
+  total_eps?: number;
+  relation?: string;
+  title?: {
+    romaji?: string;
+    english?: string;
+    native?: string;
+  };
+  year?: number;
+}
+
+export interface AnimetsuInfo {
+  id: string;
+  total_eps: number;
+  year: number;
+  title: {
+    romaji?: string;
+    english?: string;
+    native?: string;
+  };
+  genres?: string[];
+  seasons?: AnimetsuInfoSeason[];
 }
 
 export interface AnimetsuSource {
@@ -37,7 +62,7 @@ const COMMON_HEADERS = {
   'sec-fetch-dest': 'empty',
   'sec-fetch-mode': 'cors',
   'sec-fetch-site': 'same-origin',
-  'Referer': 'https://animetsu.live/'
+  'Referer': 'https://animetsu.net/'
 };
 
 export async function animetsuSearch(query: string): Promise<AnimetsuSearchResult[]> {
@@ -73,7 +98,7 @@ export async function animetsuSearch(query: string): Promise<AnimetsuSearchResul
   return [];
 }
 
-export async function animetsuGetInfo(animeId: string): Promise<AnimetsuSearchResult | null> {
+export async function animetsuGetInfo(animeId: string): Promise<AnimetsuInfo | null> {
   try {
     const res = await axios.get(`${ANIMETSU_BASE}/v2/api/anime/info/${animeId}`, {
       headers: COMMON_HEADERS,
@@ -84,6 +109,51 @@ export async function animetsuGetInfo(animeId: string): Promise<AnimetsuSearchRe
     console.error(`[Animetsu] GetInfo error for ${animeId}:`, e.message);
     return null;
   }
+}
+
+function parseSeasonNumber(relation?: string): number | null {
+  if (!relation) return null;
+  const m = relation.match(/season\s*(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+export function getAnimetsuSeasonEpisodes(info: AnimetsuInfo): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+
+  if (Array.isArray(info.seasons) && info.seasons.length > 0) {
+    const usedKeys = new Set<string>();
+    for (let i = 0; i < info.seasons.length; i++) {
+      const s = info.seasons[i];
+      const parsed = parseSeasonNumber(s.relation);
+      const key = String(parsed ?? i + 1);
+      if (usedKeys.has(key)) continue;
+      usedKeys.add(key);
+
+      const eps = Math.max(1, Number(s.total_eps || 0));
+      result[key] = Array.from({ length: eps }, (_, idx) => String(idx + 1));
+    }
+  }
+
+  if (Object.keys(result).length === 0 && info.total_eps > 0) {
+    result['1'] = Array.from({ length: info.total_eps }, (_, i) => String(i + 1));
+  }
+
+  return result;
+}
+
+export async function animetsuResolveSeasonId(animeId: string, season: number): Promise<string> {
+  const info = await animetsuGetInfo(animeId);
+  if (!info || !Array.isArray(info.seasons) || info.seasons.length === 0) {
+    return animeId;
+  }
+
+  const byRelation = info.seasons.find(s => parseSeasonNumber(s.relation) === season);
+  if (byRelation?.id) return byRelation.id;
+
+  const byIndex = info.seasons[season - 1];
+  if (byIndex?.id) return byIndex.id;
+
+  return animeId;
 }
 
 export function findBestAnimetsuMatch(results: AnimetsuSearchResult[], title: string, year?: number | null): AnimetsuSearchResult | null {
@@ -131,7 +201,7 @@ export async function animetsuGetStream(animeId: string, epNum: number): Promise
     const res = await axios.get(url, {
       headers: {
         ...COMMON_HEADERS,
-        'Referer': `https://animetsu.live/watch/${animeId}`
+        'Referer': `https://animetsu.net/watch/${animeId}`
       },
       timeout: 15000
     });

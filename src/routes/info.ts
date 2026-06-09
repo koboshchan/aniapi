@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
-import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo } from '../services/animetsu.js';
+import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo, getAnimetsuSeasonEpisodes } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -50,10 +50,12 @@ export default async function infoRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'Anime not found on Animetsu' });
       }
 
-      // Format response to match standard info format
-      const isShow = anime.total_eps > 1;
-      const epArray = Array.from({ length: anime.total_eps }, (_, i) => (i + 1).toString());
-      const episodes = isShow ? { "1": epArray } : null;
+      // Format response to match standard info format with season-aware episode map.
+      const seasonEpisodes = getAnimetsuSeasonEpisodes(anime);
+      const isShow = Object.keys(seasonEpisodes).length > 0 && (
+        Object.keys(seasonEpisodes).length > 1 || (seasonEpisodes['1']?.length || 0) > 1
+      );
+      const episodes = isShow ? seasonEpisodes : null;
 
       const result = {
         imdbId,
@@ -61,7 +63,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
         originalTitle: anime.title.romaji || anime.title.english,
         type: isShow ? 'show' : 'movie',
         mediaType: isShow ? 'show' : 'movie',
-        genres: [], // Animetsu info doesn't always have genres in the same format
+        genres: anime.genres || [],
         year: anime.year,
         episodes: episodes,
         hasPrimaryStream: true // If we have the ID, we assume it has streams on Animetsu

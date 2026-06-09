@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
-import { animetsuSearch, animetsuGetStream, findBestAnimetsuMatch } from '../services/animetsu.js';
+import { animetsuSearch, animetsuGetStream, findBestAnimetsuMatch, animetsuResolveSeasonId } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
@@ -51,7 +51,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
           streamUrl: m3u8,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-            'Referer': 'https://animetsu.live/'
+            'Referer': 'https://animetsu.net/'
           }
         };
         await setCache(cacheKey, result, 15 * 60);
@@ -158,13 +158,14 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     // Handle Animetsu ID directly
     if (imdbId.startsWith('animetsu:')) {
       const animetsuId = imdbId.split(':')[1];
-      const m3u8 = await animetsuGetStream(animetsuId, e);
+      const seasonAnimeId = await animetsuResolveSeasonId(animetsuId, s);
+      const m3u8 = await animetsuGetStream(seasonAnimeId, e);
       if (m3u8) {
         const result = {
           streamUrl: m3u8,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-            'Referer': 'https://animetsu.live/'
+            'Referer': 'https://animetsu.net/'
           }
         };
         await setCache(cacheKey, result, 15 * 60);
