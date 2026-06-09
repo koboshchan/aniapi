@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.js';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
-import { animetsuSearch, animetsuGetStream, findBestAnimetsuMatch, animetsuResolveSeasonId } from '../services/animetsu.js';
+import { animetsuGetStream, animetsuResolveSeasonId } from '../services/animetsu.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function downloadRoutes(fastify: FastifyInstance) {
@@ -82,36 +82,6 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       return result;
     }
 
-    // 2. Fallback to Animetsu
-    console.log(`[Fallback] Vaplayer failed for movie ${imdbId}, trying Animetsu...`);
-    
-    // Try multiple queries: Full title, then original title
-    const queries = [meta.title, meta.originalTitle].filter(Boolean);
-    let bestMatch = null;
-
-    for (const q of queries) {
-      // Basic sanitation for the search query itself
-      const searchQ = q.split(/[:\-]/)[0].trim();
-      const results = await animetsuSearch(searchQ);
-      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.startYear);
-      if (bestMatch) break;
-    }
-    
-    if (bestMatch) {
-      const m3u8 = await animetsuGetStream(bestMatch.id, 1);
-      if (m3u8) {
-        const result = {
-          streamUrl: m3u8,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-            'Referer': 'https://animetsu.live/'
-          }
-        };
-        await setCache(cacheKey, result, 15 * 60);
-        return result;
-      }
-    }
-
     return reply.status(404).send({ error: 'No stream found for this movie' });
   });
 
@@ -174,9 +144,6 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No stream found for this Animetsu ID' });
     }
 
-    // Fetch metadata early
-    const meta = await fetchImdbMetadata(imdbId);
-
     // 1. Try Vaplayer (Primary)
     let streamUrl = await getVaplayerEpisodeStream(imdbId, s, e);
     
@@ -191,36 +158,6 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       };
       await setCache(cacheKey, result, 15 * 60);
       return result;
-    }
-
-    // 2. Fallback to Animetsu
-    console.log(`[Fallback] Vaplayer failed for ${imdbId} S${s}E${e}, trying Animetsu...`);
-    
-    // Simple search queries based on title
-    const queries = s > 1 
-      ? [`${meta.title} Season ${s}`, `${meta.title} ${s}nd Season`, meta.title, meta.originalTitle]
-      : [meta.title, meta.originalTitle];
-    
-    let bestMatch = null;
-    for (const q of queries.filter(Boolean)) {
-      const results = await animetsuSearch(q);
-      bestMatch = findBestAnimetsuMatch(results, meta.title, meta.startYear);
-      if (bestMatch) break;
-    }
-
-    if (bestMatch) {
-      const m3u8 = await animetsuGetStream(bestMatch.id, e);
-      if (m3u8) {
-        const result = {
-          streamUrl: m3u8,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0',
-            'Referer': 'https://animetsu.live/'
-          }
-        };
-        await setCache(cacheKey, result, 15 * 60);
-        return result;
-      }
     }
 
     return reply.status(404).send({ error: 'No stream found for this episode' });
