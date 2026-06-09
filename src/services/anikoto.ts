@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 
 const ANIKOTO_BASE = 'https://anikototv.to';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0';
+const ALLOWED_PROVIDER_HOSTS = ['megaplay.buzz', 'vidwish.live'];
 
 const COMMON_HEADERS = {
   'User-Agent': USER_AGENT,
@@ -146,6 +147,11 @@ function extractProviderOrigin(embedHtml: string, fallbackUrl: string): string {
   }
 }
 
+function isAllowedProviderHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return ALLOWED_PROVIDER_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+}
+
 export async function anikotoGetEpisodeStream(
   baseSlug: string,
   season: number,
@@ -217,6 +223,11 @@ export async function anikotoGetEpisodeStream(
 
     const providerOrigin = extractProviderOrigin(embedRes.data, embedUrlRaw);
     const providerHost = new URL(providerOrigin).hostname;
+    if (!isAllowedProviderHost(providerHost)) {
+      console.warn(`[Anikoto] Unsupported provider host: ${providerHost} (from ${embedUrlRaw})`);
+      return null;
+    }
+
     const sourcesRes = await axios.get(`${providerOrigin}/stream/getSources?id=${dataId}&id=${dataId}`, {
       headers: {
         ...COMMON_HEADERS,
