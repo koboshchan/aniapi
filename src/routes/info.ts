@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
 import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo, getAnimetsuSeasonEpisodes } from '../services/animetsu.js';
+import { anikotoGetSeasonEpisodes, parseAnikotoId } from '../services/anikoto.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -12,7 +13,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567)' }
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (animetsu:id), or Anikoto ID (anikoto:id[:sub/dub])' }
         }
       },
       response: {
@@ -40,6 +41,34 @@ export default async function infoRoutes(fastify: FastifyInstance) {
     const cacheKey = `info:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Anikoto ID directly
+    if (imdbId.startsWith('anikoto:')) {
+      const parsed = parseAnikotoId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Anikoto ID format' });
+      }
+
+      const seasonEpisodes = await anikotoGetSeasonEpisodes(parsed.slug);
+      const seasonCount = Object.keys(seasonEpisodes).length;
+      const totalEpisodes = Object.values(seasonEpisodes).reduce((sum, eps) => sum + eps.length, 0);
+      const isMovie = seasonCount === 1 && totalEpisodes === 1;
+
+      const result = {
+        imdbId,
+        title: parsed.slug,
+        originalTitle: parsed.slug,
+        type: isMovie ? 'movie' : 'show',
+        mediaType: isMovie ? 'movie' : 'show',
+        genres: [],
+        year: null,
+        episodes: isMovie ? null : seasonEpisodes,
+        hasPrimaryStream: totalEpisodes > 0
+      };
+
+      await setCache(cacheKey, result, 48 * 60 * 60);
+      return result;
+    }
 
     // Handle Animetsu ID directly
     if (imdbId.startsWith('animetsu:')) {

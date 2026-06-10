@@ -29,6 +29,84 @@ export interface AnikotoStreamResult {
   headers: Record<string, string>;
 }
 
+async function getSeasonSlugs(baseSlug: string): Promise<string[]> {
+  try {
+    const html = await fetchWatchHtml(baseSlug, 1);
+    const mangaId = extractMangaId(html);
+    if (!mangaId) return [baseSlug];
+
+    const seasonsRes = await axios.get(`${ANIKOTO_BASE}/api/seasons/${mangaId}`, {
+      headers: {
+        ...COMMON_HEADERS,
+        'Referer': `${ANIKOTO_BASE}/watch/${baseSlug}/ep-1`
+      },
+      timeout: 20000
+    });
+
+    if (seasonsRes.data?.result === false || !seasonsRes.data?.result) {
+      return [baseSlug];
+    }
+
+    const $ = cheerio.load(String(seasonsRes.data.result));
+    const slugs = $('.swiper-slide.season a')
+      .map((_, el) => {
+        const href = $(el).attr('href') || '';
+        const match = href.match(/\/watch\/([^/?#]+)/);
+        return match?.[1] || '';
+      })
+      .get()
+      .filter(Boolean);
+
+    if (slugs.length === 0) return [baseSlug];
+    return Array.from(new Set(slugs));
+  } catch {
+    return [baseSlug];
+  }
+}
+
+async function getEpisodeNumbersForSlug(slug: string): Promise<string[]> {
+  try {
+    const watchHtml = await fetchWatchHtml(slug, 1);
+    const mangaId = extractMangaId(watchHtml);
+    if (!mangaId) return [];
+
+    const epListRes = await axios.get(`${ANIKOTO_BASE}/ajax/episode/list/${mangaId}?vrf=`, {
+      headers: {
+        ...COMMON_HEADERS,
+        'Referer': `${ANIKOTO_BASE}/watch/${slug}/ep-1`,
+        'Alt-Used': 'anikototv.to'
+      },
+      timeout: 20000
+    });
+
+    if (epListRes.data?.status !== 200 || !epListRes.data?.result) return [];
+
+    const $eps = cheerio.load(String(epListRes.data.result));
+    const eps = $eps('.episodes.name ul li a')
+      .map((_, el) => $eps(el).attr('data-num') || '')
+      .get()
+      .filter(Boolean);
+
+    return Array.from(new Set(eps)).sort((a, b) => Number(a) - Number(b));
+  } catch {
+    return [];
+  }
+}
+
+export async function anikotoGetSeasonEpisodes(baseSlug: string): Promise<Record<string, string[]>> {
+  const seasonSlugs = await getSeasonSlugs(baseSlug);
+  const result: Record<string, string[]> = {};
+
+  for (let i = 0; i < seasonSlugs.length; i++) {
+    const episodes = await getEpisodeNumbersForSlug(seasonSlugs[i]);
+    if (episodes.length > 0) {
+      result[String(i + 1)] = episodes;
+    }
+  }
+
+  return result;
+}
+
 export function parseAnikotoId(input: string): AnikotoResolvedId | null {
   if (!input.startsWith('anikoto:')) return null;
 
@@ -63,33 +141,8 @@ export async function anikotoResolveSeasonSlug(baseSlug: string, season: number)
   if (season <= 1) return baseSlug;
 
   try {
-    const html = await fetchWatchHtml(baseSlug, 1);
-    const mangaId = extractMangaId(html);
-    if (!mangaId) return baseSlug;
-
-    const seasonsRes = await axios.get(`${ANIKOTO_BASE}/api/seasons/${mangaId}`, {
-      headers: {
-        ...COMMON_HEADERS,
-        'Referer': `${ANIKOTO_BASE}/watch/${baseSlug}/ep-1`
-      },
-      timeout: 20000
-    });
-
-    if (seasonsRes.data?.result === false || !seasonsRes.data?.result) {
-      return baseSlug;
-    }
-
-    const $ = cheerio.load(String(seasonsRes.data.result));
-    const seasonLinks = $('.swiper-slide.season a')
-      .map((_, el) => $(el).attr('href') || '')
-      .get()
-      .filter(Boolean);
-
-    const target = seasonLinks[season - 1];
-    if (!target) return baseSlug;
-
-    const slugMatch = target.match(/\/watch\/([^/?#]+)/);
-    return slugMatch?.[1] || baseSlug;
+    const seasonSlugs = await getSeasonSlugs(baseSlug);
+    return seasonSlugs[season - 1] || baseSlug;
   } catch {
     return baseSlug;
   }
