@@ -29,6 +29,13 @@ export interface AnikotoStreamResult {
   headers: Record<string, string>;
 }
 
+export interface AnikotoInfo {
+  title: string;
+  originalTitle: string;
+  genres: string[];
+  episodes: Record<string, string[]>;
+}
+
 async function getSeasonSlugs(baseSlug: string): Promise<string[]> {
   try {
     const html = await fetchWatchHtml(baseSlug, 1);
@@ -105,6 +112,52 @@ export async function anikotoGetSeasonEpisodes(baseSlug: string): Promise<Record
   }
 
   return result;
+}
+
+function extractTitle(html: string, fallback: string): string {
+  const $ = cheerio.load(html);
+  return $('h1.title').first().text().trim() || fallback;
+}
+
+function extractGenres(html: string): string[] {
+  const $ = cheerio.load(html);
+  const genresRow = $('#w-info .bmeta .meta')
+    .first()
+    .find('div')
+    .filter((_, el) => $(el).text().includes('Genres:'))
+    .first();
+
+  if (!genresRow.length) return [];
+
+  const genres = genresRow
+    .find('a')
+    .map((_, el) => $(el).text().trim())
+    .get()
+    .filter(Boolean);
+
+  return Array.from(new Set(genres));
+}
+
+export async function anikotoGetInfo(baseSlug: string): Promise<AnikotoInfo> {
+  let title = baseSlug;
+  let genres: string[] = [];
+
+  try {
+    const html = await fetchWatchHtml(baseSlug, 1);
+    title = extractTitle(html, baseSlug);
+    genres = extractGenres(html);
+  } catch {
+    title = baseSlug;
+  }
+
+  const episodes = await anikotoGetSeasonEpisodes(baseSlug);
+
+  return {
+    title,
+    originalTitle: title,
+    genres,
+    episodes
+  };
 }
 
 export function parseAnikotoId(input: string): AnikotoResolvedId | null {

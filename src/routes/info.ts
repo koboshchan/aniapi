@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
 import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo, getAnimetsuSeasonEpisodes } from '../services/animetsu.js';
-import { anikotoGetSeasonEpisodes, parseAnikotoId } from '../services/anikoto.js';
+import { anikotoGetInfo, parseAnikotoId } from '../services/anikoto.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -49,18 +49,19 @@ export default async function infoRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'Invalid Anikoto ID format' });
       }
 
-      const seasonEpisodes = await anikotoGetSeasonEpisodes(parsed.slug);
+      const anikotoInfo = await anikotoGetInfo(parsed.slug);
+      const seasonEpisodes = anikotoInfo.episodes;
       const seasonCount = Object.keys(seasonEpisodes).length;
       const totalEpisodes = Object.values(seasonEpisodes).reduce((sum, eps) => sum + eps.length, 0);
       const isMovie = seasonCount === 1 && totalEpisodes === 1;
 
       const result = {
         imdbId,
-        title: parsed.slug,
-        originalTitle: parsed.slug,
+        title: anikotoInfo.title,
+        originalTitle: anikotoInfo.originalTitle,
         type: isMovie ? 'movie' : 'show',
         mediaType: isMovie ? 'movie' : 'show',
-        genres: [],
+        genres: anikotoInfo.genres,
         year: null,
         episodes: isMovie ? null : seasonEpisodes,
         hasPrimaryStream: totalEpisodes > 0
