@@ -136,7 +136,8 @@ export default async function subtitleRoutes(fastify: FastifyInstance) {
         properties: {
           sha256: { type: 'string' }
         }
-      }
+      },
+      security: [{ apiKey: [] }]
     }
   }, async (request: FastifyRequest<{ Params: { sha256: string } }>, reply: FastifyReply) => {
     const { sha256 } = request.params;
