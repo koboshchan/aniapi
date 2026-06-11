@@ -191,7 +191,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const e = parseInt(episode);
 
     // Check Cache
-    const cacheKey = `download:show:${imdbId}:${s}:${e}`;
+    const cacheKey = `download:show:${imdbId}:${season}:${e}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
 
@@ -228,7 +228,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     // Handle Animetsu ID directly
     if (imdbId.startsWith('animetsu:')) {
       const animetsuId = imdbId.split(':')[1];
-      const seasonAnimeId = await animetsuResolveSeasonId(animetsuId, s);
+      const seasonAnimeId = await animetsuResolveSeasonId(animetsuId, season);
       const m3u8 = await animetsuGetStream(seasonAnimeId, e);
       if (m3u8) {
         const result = {

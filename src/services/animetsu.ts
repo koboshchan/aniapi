@@ -117,18 +117,36 @@ function parseSeasonNumber(relation?: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+export function getAnimetsuSeasonMap(info: AnimetsuInfo): Record<string, AnimetsuInfoSeason> {
+  const map: Record<string, AnimetsuInfoSeason> = {};
+  if (!Array.isArray(info.seasons) || info.seasons.length === 0) {
+    return map;
+  }
+
+  for (const s of info.seasons) {
+    const parsed = parseSeasonNumber(s.relation);
+    let key: string;
+    if (parsed !== null) {
+      key = String(parsed);
+    } else {
+      let rel = s.relation || s.id;
+      if (rel.toUpperCase() === "THE MOVIE") {
+        rel = "The Movie";
+      }
+      key = rel;
+    }
+    map[key] = s;
+  }
+
+  return map;
+}
+
 export function getAnimetsuSeasonEpisodes(info: AnimetsuInfo): Record<string, string[]> {
   const result: Record<string, string[]> = {};
 
   if (Array.isArray(info.seasons) && info.seasons.length > 0) {
-    const usedKeys = new Set<string>();
-    for (let i = 0; i < info.seasons.length; i++) {
-      const s = info.seasons[i];
-      const parsed = parseSeasonNumber(s.relation);
-      const key = String(parsed ?? i + 1);
-      if (usedKeys.has(key)) continue;
-      usedKeys.add(key);
-
+    const map = getAnimetsuSeasonMap(info);
+    for (const [key, s] of Object.entries(map)) {
       const eps = Math.max(1, Number(s.total_eps || 0));
       result[key] = Array.from({ length: eps }, (_, idx) => String(idx + 1));
     }
@@ -141,17 +159,26 @@ export function getAnimetsuSeasonEpisodes(info: AnimetsuInfo): Record<string, st
   return result;
 }
 
-export async function animetsuResolveSeasonId(animeId: string, season: number): Promise<string> {
+export async function animetsuResolveSeasonId(animeId: string, season: string | number): Promise<string> {
   const info = await animetsuGetInfo(animeId);
   if (!info || !Array.isArray(info.seasons) || info.seasons.length === 0) {
     return animeId;
   }
 
-  const byRelation = info.seasons.find(s => parseSeasonNumber(s.relation) === season);
-  if (byRelation?.id) return byRelation.id;
+  const map = getAnimetsuSeasonMap(info);
+  const searchKey = String(season).toLowerCase();
 
-  const byIndex = info.seasons[season - 1];
-  if (byIndex?.id) return byIndex.id;
+  // Try exact match first
+  if (map[String(season)]?.id) {
+    return map[String(season)].id;
+  }
+
+  // Fallback to case-insensitive match
+  for (const [key, s] of Object.entries(map)) {
+    if (key.toLowerCase() === searchKey) {
+      return s.id;
+    }
+  }
 
   return animeId;
 }
