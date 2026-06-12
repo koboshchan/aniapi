@@ -153,7 +153,11 @@ async function fetchSources(
   // Build a list of (providerName, episodeId) pairs in priority order
   const candidates: { prov: string; epId: string }[] = [];
   const seen = new Set<string>();
-  for (const provName of [...Object.keys(providers), 'bonk', 'bee', 'hop', 'kiwi']) {
+  
+  // Prioritize stable providers: bonk, hop, bee, kiwi, then others
+  const priorityList = ['bonk', 'hop', 'bee', 'kiwi', ...Object.keys(providers)];
+  
+  for (const provName of priorityList) {
     if (seen.has(provName)) continue;
     seen.add(provName);
     const eps = providers[provName]?.episodes?.[audio] as MiruroEpisode[] | undefined;
@@ -189,8 +193,9 @@ async function fetchSources(
         return { streamUrl: hls.url, subtitles: src.subtitles || [] };
       }
     } catch (e: any) {
-      if (e.message?.includes('444')) continue;
-      throw e;
+      // Continue to next provider on any error (444, status errors, network issues)
+      console.warn(`[Miruro Fallback] Provider ${prov} failed:`, e.message);
+      continue;
     }
   }
 
