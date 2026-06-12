@@ -24,8 +24,8 @@ COPY --from=linuxserver/unrar:latest /usr/bin/unrar-alpine /usr/bin/unrar
 
 WORKDIR /app
 
-# Install runtime dependencies (7zip and standard libs)
-RUN apk add --no-cache 7zip libstdc++ libgcc
+# Install runtime dependencies (7zip, file, unzip, and standard libs)
+RUN apk add --no-cache 7zip file unzip libstdc++ libgcc
 
 # Copy package files
 COPY package*.json ./

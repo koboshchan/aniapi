@@ -79,7 +79,12 @@ class SubtitleCleaner {
       const tmpPath = `/tmp/enc_detect_${Date.now()}`;
       fs.writeFileSync(tmpPath, buffer);
       // macOS 'file -I' or Linux 'file -i'
-      const output = execSync(`file -I "${tmpPath}"`).toString();
+      let output = '';
+      try {
+        output = execSync(`file -i "${tmpPath}"`).toString();
+      } catch {
+        output = execSync(`file -I "${tmpPath}"`).toString();
+      }
       fs.unlinkSync(tmpPath);
       const match = output.match(/charset=([^;\s\n]+)/);
       return match ? match[1] : 'utf-8';
