@@ -121,14 +121,16 @@ export async function miruroGetInfo(anilistId: string, category: MiruroCategory)
   // Sort episodes numerically
   const sortedEps = Array.from(epNumbers).sort((a, b) => parseInt(a) - parseInt(b));
 
-  // Try to get a better title from metadata providers
+  // Robust title lookup: scan all providers for any english/standard title fields
   let title = '';
-  const metaProviders = ['ANIMEDUNYA', 'ANIMEONSEN', 'SENSHI', 'CRUNCHYROLL', 'ANIMEKAI', 'KUUDERE'];
-  for (const mp of metaProviders) {
-    const meta = providers[mp]?.meta;
-    if (meta?.title) {
-      title = meta.title;
-      break;
+  for (const provData of Object.values(providers) as any[]) {
+    const meta = provData?.meta;
+    if (meta) {
+      const candidate = meta.englishTitle || meta.title || meta.english_title;
+      if (candidate && typeof candidate === 'string' && candidate.trim().length > 0) {
+        title = candidate.trim();
+        break;
+      }
     }
   }
 
