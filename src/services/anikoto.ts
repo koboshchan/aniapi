@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 
 const ANIKOTO_BASE = 'https://anikototv.to';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0';
-const ALLOWED_PROVIDER_HOSTS = ['megaplay.buzz', 'vidwish.live'];
+const ALLOWED_PROVIDER_HOSTS = ['megaplay.buzz', 'vidwish.live', 'vidtube.site'];
 
 const COMMON_HEADERS = {
   'User-Agent': USER_AGENT,
@@ -334,7 +334,12 @@ export async function anikotoGetEpisodeStream(
       return null;
     }
 
-    const sourcesRes = await axios.get(`${providerOrigin}/stream/getSources?id=${dataId}&id=${dataId}`, {
+    let sourcesUrl = `${providerOrigin}/stream/getSources?id=${dataId}&id=${dataId}`;
+    if (providerHost === 'vidtube.site' || providerHost.endsWith('.vidtube.site')) {
+      sourcesUrl = `${providerOrigin}/stream/getSourcesNew?id=${dataId}&type=${audioType}&id=${dataId}&type=${audioType}`;
+    }
+
+    const sourcesRes = await axios.get(sourcesUrl, {
       headers: {
         ...COMMON_HEADERS,
         'Referer': embedUrl,
