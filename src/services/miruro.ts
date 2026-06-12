@@ -70,7 +70,7 @@ export interface MiruroInfo {
   title: string;
   originalTitle: string;
   genres: string[];
-  episodes: Record<string, Record<string, string[]>>; // provider -> {sub: [...], dub: [...]}
+  episodes: Record<string, string[]>; // season -> [ep1, ep2, ep3]
 }
 
 /**
@@ -90,31 +90,36 @@ export function parseMiruroId(input: string): MiruroResolvedId | null {
   return { anilistId, category };
 }
 
-export async function miruroGetInfo(anilistId: string): Promise<MiruroInfo> {
+export async function miruroGetInfo(anilistId: string, category: MiruroCategory): Promise<MiruroInfo> {
   const epData = await pipeGet('episodes', { anilistId });
   const providers = epData?.providers || {};
+  const audio: 'sub' | 'dub' = category === 'dub' ? 'dub' : 'sub';
 
-  const episodes: Record<string, Record<string, string[]>> = {};
-  const allTitles: string[] = [];
+  const epNumbers = new Set<string>();
 
-  for (const [provName, provData] of Object.entries(providers) as [string, any][]) {
-    const provEps: Record<string, string[]> = {};
+  for (const provData of Object.values(providers) as any[]) {
+    const eps = provData?.episodes?.[audio] as MiruroEpisode[] | undefined;
+    if (eps) {
+      for (const e of eps) {
+        epNumbers.add(String(e.number));
+      }
+    }
+  }
 
-    for (const audio of ['sub', 'dub'] as const) {
-      const eps = provData?.episodes?.[audio] as MiruroEpisode[] | undefined;
-      if (eps && eps.length > 0) {
-        provEps[audio] = eps.map(e => String(e.number));
-        // Collect title from first episode
-        if (allTitles.length === 0 && eps[0]?.title) {
-          allTitles.push(eps[0].title);
+  // Fallback to sub if dub requested but no dub episodes found
+  if (epNumbers.size === 0 && audio === 'dub') {
+    for (const provData of Object.values(providers) as any[]) {
+      const eps = provData?.episodes?.sub as MiruroEpisode[] | undefined;
+      if (eps) {
+        for (const e of eps) {
+          epNumbers.add(String(e.number));
         }
       }
     }
-
-    if (Object.keys(provEps).length > 0) {
-      episodes[provName] = provEps;
-    }
   }
+
+  // Sort episodes numerically
+  const sortedEps = Array.from(epNumbers).sort((a, b) => parseInt(a) - parseInt(b));
 
   // Try to get a better title from metadata providers
   let title = '';
@@ -131,7 +136,7 @@ export async function miruroGetInfo(anilistId: string): Promise<MiruroInfo> {
     title: title || `AniList ${anilistId}`,
     originalTitle: title || '',
     genres: [],
-    episodes,
+    episodes: sortedEps.length > 0 ? { "1": sortedEps } : {},
   };
 }
 

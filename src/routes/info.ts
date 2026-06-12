@@ -50,14 +50,11 @@ export default async function infoRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'Invalid Miruro ID format' });
       }
 
-      const miruroInfo = await miruroGetInfo(parsed.anilistId);
+      const miruroInfo = await miruroGetInfo(parsed.anilistId, parsed.category);
       const seasonCount = Object.keys(miruroInfo.episodes).length;
-      // Check if total episode count across providers is 1
-      let totalEpisodes = 0;
-      for (const provEps of Object.values(miruroInfo.episodes)) {
-        totalEpisodes += (provEps.sub?.length || 0) + (provEps.dub?.length || 0);
-      }
-      const isMovie = seasonCount <= 1 && totalEpisodes <= 2;
+      // Check if total episode count is 1
+      const totalEpisodes = miruroInfo.episodes['1']?.length || 0;
+      const isMovie = seasonCount <= 1 && totalEpisodes <= 1;
 
       const result = {
         imdbId,
