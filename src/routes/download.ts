@@ -3,6 +3,7 @@ import { getVaplayerData, getVaplayerEpisodeStream } from '../services/vaplayer.
 import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { animetsuGetStream, animetsuResolveSeasonId } from '../services/animetsu.js';
 import { anikotoGetEpisodeStream, parseAnikotoId } from '../services/anikoto.js';
+import { miruroGetStream, parseMiruroId } from '../services/miruro.js';
 import { storeExternalSubtitleFromUrl } from '../services/subtitles.js';
 import { getDb } from '../services/mongodb.js';
 import { getCache, setCache } from '../services/cache.js';
@@ -50,7 +51,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (e.g. animetsu:id), or Anikoto ID (e.g. anikoto:id[:sub/dub])' }
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (animetsu:id), Anikoto ID (anikoto:id[:sub/dub]), or Miruro ID (miruro:anilistId[:sub/ssub/dub])' }
         }
       },
       response: {
@@ -78,6 +79,36 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cacheKey = `download:movie:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Miruro ID directly (movie treated as episode 1)
+    if (imdbId.startsWith('miruro:')) {
+      const parsed = parseMiruroId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Miruro ID format' });
+      }
+
+      const resolved = await miruroGetStream(parsed.anilistId, 1, parsed.category);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'No stream found for this Miruro ID' });
+      }
+
+      let sub: string | null = null;
+      if (resolved.subtitleUrl) {
+        const stored = await storeExternalSubtitleFromUrl(resolved.subtitleUrl);
+        if (stored?.sha256) {
+          sub = `/subtitles/download/${stored.sha256}`;
+          await persistSubtitleMetadata(imdbId, 'movie', stored.sha256, stored.filename, stored.format);
+        }
+      }
+
+      const result = {
+        streamUrl: resolved.streamUrl,
+        sub,
+        headers: resolved.headers
+      };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
+    }
 
     // Handle Anikoto ID directly (movie treated as episode 1)
     if (imdbId.startsWith('anikoto:')) {
@@ -162,7 +193,7 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (e.g. animetsu:id), or Anikoto ID (e.g. anikoto:id[:sub/dub])' },
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (animetsu:id), Anikoto ID (anikoto:id[:sub/dub]), or Miruro ID (miruro:anilistId[:sub/ssub/dub])' },
           season: { type: 'string', description: 'Season number' },
           episode: { type: 'string', description: 'Episode number' }
         }
@@ -194,6 +225,36 @@ export default async function downloadRoutes(fastify: FastifyInstance) {
     const cacheKey = `download:show:${imdbId}:${season}:${e}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Miruro ID directly
+    if (imdbId.startsWith('miruro:')) {
+      const parsed = parseMiruroId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Miruro ID format' });
+      }
+
+      const resolved = await miruroGetStream(parsed.anilistId, e, parsed.category);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'No stream found for this Miruro ID' });
+      }
+
+      let sub: string | null = null;
+      if (resolved.subtitleUrl) {
+        const stored = await storeExternalSubtitleFromUrl(resolved.subtitleUrl);
+        if (stored?.sha256) {
+          sub = `/subtitles/download/${stored.sha256}`;
+          await persistSubtitleMetadata(imdbId, 'episode', stored.sha256, stored.filename, stored.format, s, e);
+        }
+      }
+
+      const result = {
+        streamUrl: resolved.streamUrl,
+        sub,
+        headers: resolved.headers
+      };
+      await setCache(cacheKey, result, 15 * 60);
+      return result;
+    }
 
     // Handle Anikoto ID directly
     if (imdbId.startsWith('anikoto:')) {

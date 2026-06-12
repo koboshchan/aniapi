@@ -3,6 +3,7 @@ import { fetchImdbMetadata, isShowType } from '../services/metadata.js';
 import { getVaplayerData } from '../services/vaplayer.js';
 import { animetsuSearch, findBestAnimetsuMatch, animetsuGetInfo, getAnimetsuSeasonEpisodes } from '../services/animetsu.js';
 import { anikotoGetInfo, parseAnikotoId } from '../services/anikoto.js';
+import { miruroGetInfo, parseMiruroId } from '../services/miruro.js';
 import { getCache, setCache } from '../services/cache.js';
 
 export default async function infoRoutes(fastify: FastifyInstance) {
@@ -13,7 +14,7 @@ export default async function infoRoutes(fastify: FastifyInstance) {
       params: {
         type: 'object',
         properties: {
-          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (animetsu:id), or Anikoto ID (anikoto:id[:sub/dub])' }
+          imdbId: { type: 'string', description: 'IMDb ID (e.g. tt1234567), Animetsu ID (animetsu:id), Anikoto ID (anikoto:id[:sub/dub]), or Miruro ID (miruro:anilistId[:sub/ssub/dub])' }
         }
       },
       response: {
@@ -41,6 +42,38 @@ export default async function infoRoutes(fastify: FastifyInstance) {
     const cacheKey = `info:${imdbId}`;
     const cached = await getCache(cacheKey);
     if (cached) return cached;
+
+    // Handle Miruro ID directly
+    if (imdbId.startsWith('miruro:')) {
+      const parsed = parseMiruroId(imdbId);
+      if (!parsed) {
+        return reply.status(404).send({ error: 'Invalid Miruro ID format' });
+      }
+
+      const miruroInfo = await miruroGetInfo(parsed.anilistId);
+      const seasonCount = Object.keys(miruroInfo.episodes).length;
+      // Check if total episode count across providers is 1
+      let totalEpisodes = 0;
+      for (const provEps of Object.values(miruroInfo.episodes)) {
+        totalEpisodes += (provEps.sub?.length || 0) + (provEps.dub?.length || 0);
+      }
+      const isMovie = seasonCount <= 1 && totalEpisodes <= 2;
+
+      const result = {
+        imdbId,
+        title: miruroInfo.title,
+        originalTitle: miruroInfo.originalTitle,
+        type: isMovie ? 'movie' : 'show',
+        mediaType: isMovie ? 'movie' : 'show',
+        genres: miruroInfo.genres,
+        year: null,
+        episodes: isMovie ? null : miruroInfo.episodes,
+        hasPrimaryStream: totalEpisodes > 0
+      };
+
+      await setCache(cacheKey, result, 48 * 60 * 60);
+      return result;
+    }
 
     // Handle Anikoto ID directly
     if (imdbId.startsWith('anikoto:')) {
