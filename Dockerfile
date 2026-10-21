@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:24.22.1-alpine AS builder
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ COPY src ./src
 RUN npm run build
 
 # Stage 2: Run
-FROM node:20-alpine AS runner
+FROM node:24.22.1-alpine AS runner
 
 # Get unrar from linuxserver image
 COPY --from=linuxserver/unrar:latest /usr/bin/unrar-alpine /usr/bin/unrar
